@@ -25,6 +25,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -81,7 +86,11 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
     var stravaMessage by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
-        IconButton(onClick = onBack, modifier = Modifier.padding(4.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+            Spacer(Modifier.weight(1f))
+            if (r != null) RunMenu(r, track, onDelete = { confirmDelete = true })
+        }
         if (r == null) {
             Text("This run was deleted.", Modifier.padding(24.dp))
             return@Column
@@ -130,19 +139,28 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
             }
             val elev = remember(track) { Analytics.elevationSeries(track) }
             val elevRange = elev.maxOfOrNull { it.second }?.minus(elev.minOf { it.second }) ?: 0.0
-            if (elev.size > 10 && elevRange > 3) {
+            if (elev.size > 10 && elevRange > 1) {
+                fun signed(m: Double) = when {
+                    m >= 0.5 -> "+${Math.round(m)} m"
+                    m <= -0.5 -> "−${Math.round(-m)} m"
+                    else -> "0 m"
+                }
                 Spacer(Modifier.height(28.dp))
                 Text("Elevation", style = MaterialTheme.typography.headlineSmall)
-                if (r.ascentM.isFinite()) Text("${r.ascentM.toInt()} m of climb", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                Text(
+                    "Height compared with your start" + if (r.ascentM.isFinite()) ", ${r.ascentM.toInt()} m of climb in total" else "",
+                    style = MaterialTheme.typography.bodySmall, color = Palette.Slate,
+                )
                 Spacer(Modifier.height(4.dp))
                 LineChart(
                     data = elev,
                     height = 120.dp,
                     colorAt = { Palette.Slate },
                     area = true,
-                    yFormat = { "${it.toInt()} m" },
+                    minSpan = 10.0,
+                    yFormat = { signed(it) },
                     xFormat = { "%.1f km".format(it) },
-                    inspect = { i -> "%.2f km, %d m".format(elev[i].first, elev[i].second.toInt()) },
+                    inspect = { i -> "%.2f km, ${signed(elev[i].second)}".format(elev[i].first) },
                 )
             }
 
@@ -205,15 +223,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                 }
             }
             Spacer(Modifier.height(24.dp))
-            TextButton(onClick = { confirmDelete = true }) { Text("Delete run", color = MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(12.dp))
-        }
-        FlowRow(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.Center) {
-            Text("Export", style = MaterialTheme.typography.bodyMedium, color = Palette.Slate, modifier = Modifier.align(Alignment.CenterVertically).padding(start = 8.dp, end = 4.dp))
-            TextButton(onClick = { Exports.gpx(ctx, r, track) }) { Text("GPX") }
-            TextButton(onClick = { Exports.tcx(ctx, r, track) }) { Text("TCX") }
-            TextButton(onClick = { Exports.stepsCsv(ctx, r) }) { Text("Steps CSV") }
-            TextButton(onClick = { Exports.trackCsv(ctx, r, RunPlanApp.store.trackFile(r.id)) }) { Text("GPS CSV") }
         }
         StravaRow(
             run = r,
@@ -287,4 +297,48 @@ private fun ZoneLegend(track: List<TrackPoint>, paces: Paces?) {
             }
         }
     }
+}
+
+/** Overflow menu: Export (then a format) and Delete. */
+@Composable
+private fun RunMenu(r: RunRecord, track: List<TrackPoint>, onDelete: () -> Unit) {
+    val ctx = LocalContext.current
+    var menu by remember { mutableStateOf(false) }
+    var exports by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
+        DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text("Export") },
+                leadingIcon = { Icon(Icons.Outlined.FileDownload, contentDescription = null) },
+                onClick = { menu = false; exports = true },
+            )
+            DropdownMenuItem(
+                text = { Text("Delete run", color = MaterialTheme.colorScheme.error) },
+                leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                onClick = { menu = false; onDelete() },
+            )
+        }
+        DropdownMenu(expanded = exports, onDismissRequest = { exports = false }) {
+            val hasTrack = track.size >= 2
+            ExportItem("GPX", "Route for any map or fitness app", hasTrack) { exports = false; Exports.gpx(ctx, r, track) }
+            ExportItem("TCX", "Route with each step as a lap", hasTrack) { exports = false; Exports.tcx(ctx, r, track) }
+            ExportItem("Steps CSV", "Pace and target for every step", true) { exports = false; Exports.stepsCsv(ctx, r) }
+            ExportItem("GPS CSV", "Every raw GPS reading", hasTrack) { exports = false; Exports.trackCsv(ctx, r, RunPlanApp.store.trackFile(r.id)) }
+        }
+    }
+}
+
+@Composable
+private fun ExportItem(title: String, help: String, enabled: Boolean, onClick: () -> Unit) {
+    DropdownMenuItem(
+        enabled = enabled,
+        text = {
+            Column {
+                Text(title, style = MaterialTheme.typography.titleSmall)
+                Text(help, style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+            }
+        },
+        onClick = onClick,
+    )
 }

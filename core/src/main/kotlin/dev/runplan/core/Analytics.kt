@@ -105,13 +105,16 @@ object Analytics {
         }
     }
 
-    /** (km, altitude m) smoothed. */
+    /** (km, metres above or below the start) smoothed. */
     fun elevationSeries(points: List<TrackPoint>, maxPoints: Int = 300): List<Pair<Double, Double>> {
         val (_, d) = profile(points)
         if (d.size < 2) return emptyList()
         val alts = smooth(points.map { it.alt }, 7)
         val step = max(1, points.size / maxPoints)
-        return points.indices.step(step).filter { points[it].alt != 0.0 }.map { d[it] / 1000 to alts[it] }
+        val idx = points.indices.step(step).filter { points[it].alt != 0.0 }
+        if (idx.isEmpty()) return emptyList()
+        val start = alts[idx.first()]
+        return idx.map { d[it] / 1000 to alts[it] - start }
     }
 
     fun mondayOf(epochDay: Long): Long = PlanBuilder.mondayOf(epochDay)

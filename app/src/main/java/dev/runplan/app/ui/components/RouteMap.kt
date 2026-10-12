@@ -27,7 +27,9 @@ import dev.runplan.core.Paces
 import dev.runplan.core.PaceZones
 import dev.runplan.core.TrackPoint
 import dev.runplan.core.Zone
-import org.osmdroid.tileprovider.tilesource.XYTileSource
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
@@ -37,15 +39,20 @@ import org.osmdroid.views.overlay.Polygon
 import org.osmdroid.views.overlay.Polyline
 import kotlin.math.cos
 
-/** Light, low-contrast basemap so the route colours carry the information. */
-private val CartoLight = XYTileSource(
-    "CartoLight", 0, 20, 512, "@2x.png",
-    arrayOf(
-        "https://a.basemaps.cartocdn.com/light_all/",
-        "https://b.basemaps.cartocdn.com/light_all/",
-        "https://c.basemaps.cartocdn.com/light_all/",
-    ),
-    "© OpenStreetMap contributors © CARTO",
+/**
+ * Standard OpenStreetMap tiles (no API key), shown greyed and lightened so the
+ * route colours carry the information.
+ */
+private val Muted = ColorMatrixColorFilter(
+    ColorMatrix().apply {
+        setSaturation(0f)
+        postConcat(ColorMatrix(floatArrayOf(
+            0.55f, 0f, 0f, 0f, 112f,
+            0f, 0.55f, 0f, 0f, 112f,
+            0f, 0f, 0.55f, 0f, 112f,
+            0f, 0f, 0f, 1f, 0f,
+        )))
+    },
 )
 
 /** Keep at most [max] points, evenly spaced, always including the last. */
@@ -81,7 +88,8 @@ fun RouteMap(points: List<TrackPoint>, paces: Paces?, modifier: Modifier = Modif
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val map = remember {
         MapView(ctx).apply {
-            setTileSource(CartoLight)
+            setTileSource(TileSourceFactory.MAPNIK)
+            overlayManager.tilesOverlay.setColorFilter(Muted)
             setMultiTouchControls(true)
             zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
             isTilesScaledToDpi = false

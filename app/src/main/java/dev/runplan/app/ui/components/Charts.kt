@@ -85,6 +85,7 @@ fun LineChart(
     area: Boolean = false,
     dots: Boolean = false,
     yTicks: List<Double>? = null,
+    minSpan: Double = 0.0,
     yFormat: (Double) -> String,
     xFormat: (Double) -> String,
     inspect: (Int) -> String,
@@ -96,7 +97,11 @@ fun LineChart(
     val ys = finite.map { it.second }
     var lo = if (robust) percentile(ys, 0.02) else ys.min()
     var hi = if (robust) percentile(ys, 0.98) else ys.max()
-    if (hi - lo < 1e-6) { lo -= 1; hi += 1 }
+    if (hi - lo < max(minSpan, 1e-6)) {
+        val mid = (hi + lo) / 2
+        val half = max(minSpan, 2.0) / 2
+        lo = mid - half; hi = mid + half
+    }
     val step = niceStep(hi - lo, 3, yTicks)
     lo = floor(lo / step) * step
     hi = ceil(hi / step) * step
