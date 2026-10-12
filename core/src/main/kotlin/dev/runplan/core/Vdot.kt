@@ -55,15 +55,18 @@ object Vdot {
     fun paceAtFraction(vdot: Double, frac: Double): Double = 60000.0 / velocityForVo2(vdot * frac)
 }
 
-/** Training zones. [code] is the short label shown on screen. */
-enum class Zone(val code: String, val label: String, val use: String) {
-    E("E", "Easy", "Easy and long runs"),
-    M("M", "Marathon pace", "Marathon race pace"),
-    HM("HM", "Half pace", "Half-marathon race pace"),
-    T("T", "Threshold", "Comfortably hard, ~1 hour race effort"),
-    I("I", "Interval", "VO2max reps, ~3-5 min"),
-    R("R", "Rep", "Short fast reps and strides"),
-    G("G", "Race pace", "Goal race pace at current fitness"),
+/**
+ * Training zones. [code] is a stable internal id (stored and exported); [label] and [word] are
+ * what users see, in plain language.
+ */
+enum class Zone(val code: String, val label: String, val word: String, val use: String) {
+    E("E", "Easy", "easy", "Conversational. Easy runs, long runs, warm-ups"),
+    M("M", "Marathon pace", "marathon pace", "Your marathon race pace"),
+    HM("HM", "Half-marathon pace", "half-marathon pace", "Your half-marathon race pace"),
+    T("T", "Tempo", "tempo", "Comfortably hard: a pace you could hold for about an hour"),
+    I("I", "Hard", "hard", "Hard reps of 3 to 5 minutes"),
+    R("R", "Fast", "fast", "Short, fast reps and strides, relaxed form"),
+    G("G", "Race pace", "race pace", "Your goal race pace at current fitness"),
 }
 
 /** Pace bands in seconds per km. For every zone, `fast < slow`. */

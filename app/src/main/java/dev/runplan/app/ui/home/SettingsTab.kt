@@ -40,6 +40,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.runplan.app.RunPlanApp
+import dev.runplan.app.data.Updater
+import kotlinx.coroutines.launch
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Distance
 import dev.runplan.core.Fmt
@@ -105,6 +107,9 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
             "Install RunPlan on your Galaxy Watch and open it before you start. It shows your step, target and pace, buzzes on every change, and can pause or skip a step.",
             style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
         )
+
+        Section("App")
+        AppUpdate()
 
         Section("Plan")
         Action("Start a new plan", "Clears this plan. Your run history is kept.") { confirmNew = true }
@@ -187,4 +192,62 @@ private fun UpdateFitnessDialog(onDismiss: () -> Unit, onSave: (Distance, Double
         confirmButton = { TextButton(onClick = { onSave(d, sec) }, enabled = ok) { Text("Update paces") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+private sealed interface UpdateState {
+    data object Idle : UpdateState
+    data object Checking : UpdateState
+    data object UpToDate : UpdateState
+    data class Available(val v: Updater.Version) : UpdateState
+    data class Downloading(val progress: Float) : UpdateState
+    data class Ready(val apk: java.io.File) : UpdateState
+    data class Failed(val message: String) : UpdateState
+}
+
+@Composable
+private fun AppUpdate() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val installed = remember { Updater.installed(ctx) }
+    var state by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
+
+    fun check() {
+        state = UpdateState.Checking
+        scope.launch {
+            state = runCatching { Updater.latest() }.fold(
+                { v -> if (v.code > installed.code) UpdateState.Available(v) else UpdateState.UpToDate },
+                { e -> UpdateState.Failed(e.message ?: "Couldn't check for updates.") },
+            )
+        }
+    }
+
+    fun install(apk: java.io.File) {
+        if (Updater.canInstall(ctx)) Updater.install(ctx, apk) else Updater.requestInstallPermission(ctx)
+    }
+
+    Text("Version ${installed.name}", style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
+    when (val st = state) {
+        UpdateState.Idle -> Action("Check for updates", "Downloads the latest build from GitHub") { check() }
+        UpdateState.Checking -> Text("Checking…", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 12.dp))
+        UpdateState.UpToDate -> Action("You're up to date", "Tap to check again") { check() }
+        is UpdateState.Available -> Action("Version ${st.v.name} is available", "Tap to download and install. Your plan and runs are kept.") {
+            state = UpdateState.Downloading(0f)
+            scope.launch {
+                state = runCatching { Updater.download(ctx) { p -> state = UpdateState.Downloading(p) } }.fold(
+                    { apk -> install(apk); UpdateState.Ready(apk) },
+                    { e -> UpdateState.Failed(e.message ?: "Download failed.") },
+                )
+            }
+        }
+        is UpdateState.Downloading -> Text(
+            "Downloading… ${(st.progress * 100).toInt()}%",
+            style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(vertical = 12.dp),
+        )
+        is UpdateState.Ready -> Action(
+            "Install update",
+            if (Updater.canInstall(ctx)) "Android will ask you to confirm the update"
+            else "First allow RunPlan to install apps on the screen that opens, then come back and tap again",
+        ) { install(st.apk) }
+        is UpdateState.Failed -> Action("Update failed", "${st.message} Tap to try again.") { check() }
+    }
 }

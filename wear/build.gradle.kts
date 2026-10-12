@@ -13,8 +13,10 @@ android {
         applicationId = "dev.runplan"
         minSdk = 30
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI run number, so every build is newer than the last and the in-app updater can compare
+        val build = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionCode = build
+        versionName = "0.1.$build"
     }
 
     signingConfigs {

@@ -52,7 +52,7 @@ object Fmt {
         else -> "Open"
     }
 
-    /** One-line summary of a workout, e.g. "15 min E · 5 × (5 min I + 2 min jog) · 10 min E". */
+    /** One-line summary of a workout, e.g. "15 min easy, 5 × (5 min hard + 2 min jog), 10 min easy". */
     fun summary(w: Workout): String = w.blocks.joinToString(", ") { b ->
         when (b) {
             is Single -> stepShort(b.step)
@@ -61,5 +61,5 @@ object Fmt {
     }
 
     private fun stepShort(s: Step): String =
-        amount(s) + (s.zone?.let { " ${it.code}" } ?: if (s.kind == StepKind.RECOVERY) " jog" else "")
+        amount(s) + (s.zone?.let { " ${it.word}" } ?: if (s.kind == StepKind.RECOVERY) " jog" else "")
 }
