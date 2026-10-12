@@ -25,7 +25,6 @@ import dev.runplan.app.MainActivity
 import dev.runplan.app.R
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.RunRecord
-import dev.runplan.app.data.Strava
 import dev.runplan.core.Cue
 import dev.runplan.core.Fmt
 import dev.runplan.core.Odometer
@@ -251,10 +250,6 @@ class RunService : LifecycleService() {
                 odo.points.toList(),
             )
             savedId = id
-            if (store.state.value.strava.let { it.connected && it.autoUpload }) {
-                val run = store.state.value.runs.first { it.id == id }
-                RunPlanApp.scope.launch { runCatching { Strava.upload(run) } }
-            }
             watch.send(e.state(paused = false, gpsOk = true))
         }
         phase = if (savedId != null) RunPhase.SAVED else RunPhase.IDLE

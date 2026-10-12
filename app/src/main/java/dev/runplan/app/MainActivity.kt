@@ -26,9 +26,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import androidx.lifecycle.lifecycleScope
-import dev.runplan.app.data.Strava
-import kotlinx.coroutines.launch
 import dev.runplan.app.run.RunPhase
 import dev.runplan.app.run.RunService
 import dev.runplan.app.run.RunSession
@@ -47,29 +44,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (intent?.getBooleanExtra(EXTRA_OPEN_RUN, false) == true) openRun.value++
-        if (savedInstanceState == null) handleStravaRedirect(intent)
         setContent { RunPlanTheme { AppRoot(openRun.value) } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_RUN, false)) openRun.value++
-        handleStravaRedirect(intent)
-    }
-
-    /** Strava sends the user back to runplan://localhost/strava?code=... after they approve. */
-    private fun handleStravaRedirect(intent: Intent?) {
-        val uri = intent?.data ?: return
-        if (uri.scheme != "runplan" || uri.path != "/strava") return
-        lifecycleScope.launch {
-            val err = Strava.handleRedirect(uri)
-            val name = RunPlanApp.store.state.value.strava.athlete
-            Toast.makeText(
-                this@MainActivity,
-                err ?: "Strava connected${if (name.isNotBlank()) " as $name" else ""}",
-                Toast.LENGTH_LONG,
-            ).show()
-        }
     }
 
     companion object {

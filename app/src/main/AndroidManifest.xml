@@ -21,7 +21,6 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
         </intent>
-        <package android:name="com.strava" />
     </queries>
 
     <application
@@ -41,13 +40,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <!-- Strava OAuth redirect: runplan://localhost/strava?code=... -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="runplan" android:host="localhost" android:path="/strava" />
             </intent-filter>
         </activity>
 

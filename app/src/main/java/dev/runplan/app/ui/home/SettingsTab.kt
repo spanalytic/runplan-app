@@ -21,7 +21,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -38,14 +37,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.platform.LocalContext
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.runplan.app.RunPlanApp
-import dev.runplan.app.data.Strava
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Distance
 import dev.runplan.core.Fmt
@@ -99,7 +93,11 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
         Toggle("Kilometre splits", "Announced on easy runs, long runs and long steps", state.settings.splits) { store.setSettings(state.settings.copy(splits = it)) }
 
         Section("Strava")
-        StravaSettings()
+        Text(
+            "Open a run and tap Upload to Strava. RunPlan saves it to Downloads as a TCX, with each step as a lap, " +
+                "and opens Strava's uploader: choose the file there. No Strava subscription needed.",
+            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+        )
 
         Section("Watch")
         Text(
@@ -186,52 +184,4 @@ private fun UpdateFitnessDialog(onDismiss: () -> Unit, onSave: (Distance, Double
         confirmButton = { TextButton(onClick = { onSave(d, sec) }, enabled = ok) { Text("Update paces") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
-}
-
-@Composable
-private fun StravaSettings() {
-    val ctx = LocalContext.current
-    val store = RunPlanApp.store
-    val state by store.state.collectAsStateWithLifecycle()
-    val auth = state.strava
-    if (auth.connected) {
-        Text(
-            if (auth.athlete.isNotBlank()) "Connected as ${auth.athlete}." else "Connected.",
-            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
-        )
-        Toggle("Upload runs automatically", "Each saved run goes to Strava with its intervals as laps", auth.autoUpload) { on ->
-            store.setStrava { it.copy(autoUpload = on) }
-        }
-        Action("Disconnect Strava", "Stops uploads. Runs already on Strava stay there.") { Strava.disconnect() }
-        return
-    }
-    var id by remember { mutableStateOf(auth.clientId) }
-    var secret by remember { mutableStateOf(auth.clientSecret) }
-    Text(
-        "Uploading uses your own free Strava API app. On strava.com/settings/api, create an app with any name and website, " +
-            "and set Authorization Callback Domain to localhost. Then paste its Client ID and Client Secret here.",
-        style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
-    )
-    Action("Open Strava API settings", "strava.com/settings/api") {
-        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.strava.com/settings/api")))
-    }
-    OutlinedTextField(
-        value = id, onValueChange = { id = it.filter(Char::isDigit) }, label = { Text("Client ID") }, singleLine = true,
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(8.dp))
-    OutlinedTextField(
-        value = secret, onValueChange = { secret = it.trim() }, label = { Text("Client Secret") }, singleLine = true,
-        visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(12.dp))
-    Button(
-        onClick = {
-            store.setStrava { it.copy(clientId = id, clientSecret = secret) }
-            Strava.authorize(ctx)
-        },
-        enabled = id.isNotBlank() && secret.length >= 20,
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth().height(52.dp),
-    ) { Text("Connect Strava") }
 }

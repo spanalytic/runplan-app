@@ -36,7 +36,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,7 +54,6 @@ import dev.runplan.core.Paces
 import dev.runplan.core.TrackPoint
 import dev.runplan.core.Zone
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Fmt
@@ -76,9 +74,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
     val track by produceState(emptyList<TrackPoint>(), id) {
         value = withContext(Dispatchers.IO) { RunPlanApp.store.readTrack(id) }
     }
-    var uploading by remember { mutableStateOf(false) }
-    var uploadError by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
+    var stravaMessage by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         IconButton(onClick = onBack, modifier = Modifier.padding(4.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -164,17 +160,13 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
         StravaRow(
             run = r,
             hasTrack = track.size >= 2,
-            uploading = uploading,
-            error = uploadError,
+            message = stravaMessage,
             onUpload = {
-                uploading = true
-                uploadError = null
-                scope.launch {
-                    runCatching { Strava.upload(r) }.onFailure { uploadError = it.message ?: "Upload failed." }
-                    uploading = false
-                }
+                stravaMessage = runCatching { Strava.sendViaWeb(ctx, r, track) }.fold(
+                    { name -> "Saved $name to Downloads. On the Strava page, choose it as the file to upload. If you see Strava's mobile page instead, switch your browser to Desktop site." },
+                    { e -> e.message ?: "Couldn't save the file." },
+                )
             },
-            onOpen = { Strava.open(ctx, it) },
         )
         Button(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 20.dp).height(52.dp)) {
             Text("Done")
@@ -205,21 +197,16 @@ private fun Big(value: String, label: String) {
 }
 
 @Composable
-private fun StravaRow(run: RunRecord, hasTrack: Boolean, uploading: Boolean, error: String?, onUpload: () -> Unit, onOpen: (Long) -> Unit) {
-    val auth by RunPlanApp.store.state.collectAsStateWithLifecycle()
+private fun StravaRow(run: RunRecord, hasTrack: Boolean, message: String?, onUpload: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
-        val id = run.stravaId
-        when {
-            id != null -> OutlinedButton(onClick = { onOpen(id) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text("View on Strava", color = StravaOrange)
+        if (hasTrack) {
+            OutlinedButton(onClick = onUpload, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Text(if (run.sentToStrava) "Upload to Strava again" else "Upload to Strava", color = StravaOrange)
             }
-            !auth.strava.connected -> Text("Connect Strava in Settings to upload runs.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
-            !hasTrack -> Text("No GPS track, so there's nothing to upload.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
-            else -> OutlinedButton(onClick = onUpload, enabled = !uploading, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text(if (uploading) "Uploading to Strava…" else "Upload to Strava", color = if (uploading) Palette.Slate else StravaOrange)
-            }
+        } else {
+            Text("No GPS track, so there's nothing to upload to Strava.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
         }
-        if (error != null) Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp))
+        if (message != null) Text(message, style = MaterialTheme.typography.bodySmall, color = Palette.Slate, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(8.dp))
     }
 }

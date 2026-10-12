@@ -81,7 +81,7 @@ fun RunsTab(modifier: Modifier, openRun: (String) -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text(r.title, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            LocalDate.ofEpochDay(r.epochDay).format(dateFmt) + if (r.stravaId != null) ", on Strava" else "",
+                            LocalDate.ofEpochDay(r.epochDay).format(dateFmt) + if (r.sentToStrava) ", sent to Strava" else "",
                             style = MaterialTheme.typography.bodySmall, color = Palette.Slate,
                         )
                     }
