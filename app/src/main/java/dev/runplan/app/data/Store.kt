@@ -85,11 +85,11 @@ class Store(context: Context) {
     fun deleteRun(id: String) {
         File(tracks, "$id.csv").delete()
         update { st ->
-            val r = st.runs.firstOrNull { it.id == id }
-            val stillDone = r?.workoutId != null && st.runs.any { it.id != id && it.workoutId == r.workoutId }
+            val wid: String? = st.runs.firstOrNull { it.id == id }?.workoutId
+            val stillDone = wid != null && st.runs.any { it.id != id && it.workoutId == wid }
             st.copy(
                 runs = st.runs.filter { it.id != id },
-                done = if (r?.workoutId != null && !stillDone) st.done - r.workoutId else st.done,
+                done = if (wid != null && !stillDone) st.done - wid else st.done,
             )
         }
     }

@@ -99,7 +99,7 @@ private fun AppRoot(openRunSignal: Int) {
                     RunPlanApp.store.setProfile(profile)
                     nav.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
                 },
-                onCancel = if (edit) ({ nav.popBackStack() }) else null,
+                onCancel = if (edit) ({ nav.popBackStack(); Unit }) else null,
             )
         }
         composable(Routes.HOME) {
