@@ -3,18 +3,15 @@ package dev.runplan.app.data
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
+import dev.runplan.core.ActivityFiles
 import dev.runplan.core.Fmt
+import dev.runplan.core.Lap
 import dev.runplan.core.TrackPoint
 import java.io.File
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
-import java.time.format.DateTimeFormatter
 
 /** CSV and GPX exports, shared through the system share sheet. */
 object Exports {
-    private val iso = DateTimeFormatter.ISO_INSTANT
-
     private fun dir(ctx: Context) = File(ctx.cacheDir, "exports").apply { mkdirs() }
 
     private fun share(ctx: Context, file: File, mime: String, title: String) {
@@ -67,23 +64,20 @@ object Exports {
         share(ctx, f, "text/csv", "Export GPS track")
     }
 
-    /** GPX track for Strava, Garmin Connect etc. Times are reconstructed from the run's wall-clock start. */
+    /** GPX track (filtered positions) for Strava, Garmin Connect etc. */
     fun gpx(ctx: Context, r: RunRecord, points: List<TrackPoint>) {
         if (points.isEmpty()) return
-        val t0 = points.first().tMs
         val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}.gpx")
-        f.bufferedWriter().use { w ->
-            w.write("""<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="RunPlan" xmlns="http://www.topografix.com/GPX/1/1">
-<metadata><time>${iso.format(Instant.ofEpochMilli(r.startMs).atOffset(ZoneOffset.UTC))}</time></metadata>
-<trk><name>${r.title.replace("&", "and").replace("<", "")}</name><type>running</type><trkseg>
-""")
-            points.forEach { p ->
-                val t = Instant.ofEpochMilli(r.startMs + (p.tMs - t0))
-                w.write("<trkpt lat=\"${p.lat}\" lon=\"${p.lon}\"><ele>${"%.1f".format(p.alt)}</ele><time>${iso.format(t)}</time></trkpt>\n")
-            }
-            w.write("</trkseg></trk>\n</gpx>\n")
-        }
+        f.writeText(ActivityFiles.gpx(r.title, r.startMs, if (r.startClockMs > 0) r.startClockMs else points.first().tMs, points))
         share(ctx, f, "application/gpx+xml", "Export GPX")
+    }
+
+    /** TCX with one lap per workout step. */
+    fun tcx(ctx: Context, r: RunRecord, points: List<TrackPoint>) {
+        if (points.isEmpty()) return
+        val laps = r.steps.mapIndexedNotNull { i, s -> r.stepStartsMs.getOrNull(i)?.let { Lap(it, s.sec, s.metres, s.label.startsWith("Recovery")) } }
+        val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}.tcx")
+        f.writeText(ActivityFiles.tcx(r.startMs, if (r.startClockMs > 0) r.startClockMs else points.first().tMs, points, laps, Strava.description(r)))
+        share(ctx, f, "application/vnd.garmin.tcx+xml", "Export TCX")
     }
 }

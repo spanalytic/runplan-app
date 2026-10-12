@@ -21,6 +21,20 @@ data class Settings(
     val splits: Boolean = true,
 )
 
+/** Strava API app credentials (the user's own) and the tokens from connecting it. */
+data class StravaAuth(
+    val clientId: String = "",
+    val clientSecret: String = "",
+    val accessToken: String = "",
+    val refreshToken: String = "",
+    val expiresAt: Long = 0,          // epoch seconds
+    val athlete: String = "",
+    val autoUpload: Boolean = false,
+) {
+    val configured: Boolean get() = clientId.isNotBlank() && clientSecret.isNotBlank()
+    val connected: Boolean get() = refreshToken.isNotBlank()
+}
+
 data class RunRecord(
     val id: String,
     val epochDay: Long,
@@ -31,6 +45,9 @@ data class RunRecord(
     val metres: Double,
     val steps: List<StepResult>,
     val splits: List<Double>,
+    val startClockMs: Long = 0,                 // elapsedRealtime at start, same clock as track points
+    val stepStartsMs: List<Long> = emptyList(), // elapsedRealtime at the start of each step
+    val stravaId: Long? = null,
 ) {
     val pace: Double get() = if (metres > 50) sec / (metres / 1000) else Double.NaN
 }
@@ -40,6 +57,7 @@ data class AppState(
     val done: Set<String> = emptySet(),
     val settings: Settings = Settings(),
     val runs: List<RunRecord> = emptyList(),
+    val strava: StravaAuth = StravaAuth(),
 )
 
 /**
@@ -71,6 +89,10 @@ class Store(context: Context) {
     fun setProfile(p: Profile?) = update { it.copy(profile = p) }
     fun setDone(id: String, done: Boolean) = update { it.copy(done = if (done) it.done + id else it.done - id) }
     fun setSettings(s: Settings) = update { it.copy(settings = s) }
+    fun setStrava(f: (StravaAuth) -> StravaAuth) = update { it.copy(strava = f(it.strava)) }
+    fun setStravaId(runId: String, activityId: Long) = update { st ->
+        st.copy(runs = st.runs.map { if (it.id == runId) it.copy(stravaId = activityId) else it })
+    }
 
     fun addRun(r: RunRecord, points: List<TrackPoint>) {
         writeTrack(r.id, points)
@@ -100,8 +122,10 @@ class Store(context: Context) {
 
     private fun writeTrack(id: String, points: List<TrackPoint>) {
         File(tracks, "$id.csv").bufferedWriter().use { w ->
-            w.write("t_ms,lat,lon,alt,acc,speed,speed_acc\n")
-            points.forEach { w.write("${it.tMs},${it.lat},${it.lon},${it.alt},${it.acc},${it.speed},${it.speedAcc}\n") }
+            w.write("t_ms,lat,lon,alt,acc,speed,speed_acc,dist,f_lat,f_lon,f_speed\n")
+            points.forEach {
+                w.write("${it.tMs},${it.lat},${it.lon},${it.alt},${it.acc},${it.speed},${it.speedAcc},${it.dist},${it.fLat},${it.fLon},${it.fSpeed}\n")
+            }
         }
     }
 
@@ -116,6 +140,8 @@ class Store(context: Context) {
                 TrackPoint(
                     c[0].toLong(), c[1].toDouble(), c[2].toDouble(), c[3].toDouble(), c[4].toFloat(),
                     c.getOrNull(5)?.toFloatOrNull() ?: Float.NaN, c.getOrNull(6)?.toFloatOrNull() ?: Float.NaN,
+                    c.getOrNull(7)?.toDoubleOrNull() ?: Double.NaN, c.getOrNull(8)?.toDoubleOrNull() ?: Double.NaN,
+                    c.getOrNull(9)?.toDoubleOrNull() ?: Double.NaN, c.getOrNull(10)?.toDoubleOrNull() ?: Double.NaN,
                 )
             }.getOrNull()
         }
@@ -157,6 +183,15 @@ class Store(context: Context) {
                 put("paceAlerts", s.settings.paceAlerts)
                 put("splits", s.settings.splits)
             })
+            put("strava", JSONObject().apply {
+                put("clientId", s.strava.clientId)
+                put("clientSecret", s.strava.clientSecret)
+                put("accessToken", s.strava.accessToken)
+                put("refreshToken", s.strava.refreshToken)
+                put("expiresAt", s.strava.expiresAt)
+                put("athlete", s.strava.athlete)
+                put("autoUpload", s.strava.autoUpload)
+            })
             put("runs", JSONArray().apply {
                 s.runs.forEach { r ->
                     put(JSONObject().apply {
@@ -168,6 +203,9 @@ class Store(context: Context) {
                         put("sec", r.sec)
                         put("metres", r.metres)
                         put("splits", JSONArray().apply { r.splits.forEach { put(num(it)) } })
+                        put("startClockMs", r.startClockMs)
+                        put("stepStartsMs", JSONArray(r.stepStartsMs))
+                        put("stravaId", r.stravaId ?: JSONObject.NULL)
                         put("steps", JSONArray().apply {
                             r.steps.forEach { st ->
                                 put(JSONObject().apply {
@@ -223,10 +261,19 @@ class Store(context: Context) {
                         metres = r.getDouble("metres"),
                         steps = steps,
                         splits = splits,
+                        startClockMs = r.optLong("startClockMs", 0),
+                        stepStartsMs = r.optJSONArray("stepStartsMs")?.let { sa -> (0 until sa.length()).map { j -> sa.getLong(j) } } ?: emptyList(),
+                        stravaId = if (r.isNull("stravaId")) null else r.optLong("stravaId"),
                     )
                 }
             } ?: emptyList()
-            return AppState(profile, done, settings, runs)
+            val strava = o.optJSONObject("strava")?.let {
+                StravaAuth(
+                    it.optString("clientId"), it.optString("clientSecret"), it.optString("accessToken"),
+                    it.optString("refreshToken"), it.optLong("expiresAt"), it.optString("athlete"), it.optBoolean("autoUpload"),
+                )
+            } ?: StravaAuth()
+            return AppState(profile, done, settings, runs, strava)
         }
     }
 }

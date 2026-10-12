@@ -1,6 +1,16 @@
 package dev.runplan.app.ui.home
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.draw.clip
+import dev.runplan.app.ui.components.RouteThumb
+import dev.runplan.app.ui.components.downsample
+import dev.runplan.core.TrackPoint
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -61,9 +71,19 @@ fun RunsTab(modifier: Modifier, openRun: (String) -> Unit) {
                     Modifier.fillMaxWidth().clickable { openRun(r.id) }.padding(horizontal = 20.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val shape by produceState(emptyList<TrackPoint>(), r.id) {
+                        value = withContext(Dispatchers.IO) { downsample(RunPlanApp.store.readTrack(r.id), 150) }
+                    }
+                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surface)) {
+                        RouteThumb(shape, Modifier.fillMaxSize())
+                    }
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
                         Text(r.title, style = MaterialTheme.typography.titleMedium)
-                        Text(LocalDate.ofEpochDay(r.epochDay).format(dateFmt), style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                        Text(
+                            LocalDate.ofEpochDay(r.epochDay).format(dateFmt) + if (r.stravaId != null) ", on Strava" else "",
+                            style = MaterialTheme.typography.bodySmall, color = Palette.Slate,
+                        )
                     }
                     Column(horizontalAlignment = Alignment.End) {
                         Text("${Fmt.km(r.metres)} km", style = MaterialTheme.typography.headlineSmall)

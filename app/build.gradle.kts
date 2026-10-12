@@ -61,4 +61,5 @@ dependencies {
     implementation(libs.play.services.wearable)
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.play.services)
+    implementation(libs.osmdroid)
 }

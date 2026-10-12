@@ -10,6 +10,7 @@ wearCompose = "1.4.0"
 playWearable = "19.0.0"
 coroutines = "1.9.0"
 splash = "1.0.1"
+osmdroid = "6.1.20"
 
 [libraries]
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -29,6 +30,7 @@ wear-compose-material = { module = "androidx.wear.compose:compose-material", ver
 wear-compose-foundation = { module = "androidx.wear.compose:compose-foundation", version.ref = "wearCompose" }
 play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "playWearable" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+osmdroid = { module = "org.osmdroid:osmdroid-android", version.ref = "osmdroid" }
 coroutines-play-services = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
 [plugins]

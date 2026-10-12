@@ -25,6 +25,7 @@ import dev.runplan.app.MainActivity
 import dev.runplan.app.R
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.RunRecord
+import dev.runplan.app.data.Strava
 import dev.runplan.core.Cue
 import dev.runplan.core.Fmt
 import dev.runplan.core.Odometer
@@ -57,6 +58,8 @@ class RunService : LifecycleService() {
     private var activeAccumMs = 0L
     private var resumedAtMs = 0L
     private var startWallMs = 0L
+    private var startClockMs = 0L
+    private val stepStarts = ArrayList<Long>()
     private var ticker: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var locationManager: LocationManager? = null
@@ -146,6 +149,7 @@ class RunService : LifecycleService() {
         if (phase != RunPhase.READY) return
         phase = RunPhase.RUNNING
         startWallMs = System.currentTimeMillis()
+        startClockMs = SystemClock.elapsedRealtime()
         resumedAtMs = SystemClock.elapsedRealtime()
         odo.resume()
         handle(e.start())
@@ -198,7 +202,10 @@ class RunService : LifecycleService() {
                 else -> true
             }
             if (speak) speaker.speak(c.speech(), interrupt = c is Cue.StepStart || c is Cue.Finished)
-            if (c is Cue.StepStart) buzz(longArrayOf(0, 120, 80, 120))
+            if (c is Cue.StepStart) {
+                stepStarts += SystemClock.elapsedRealtime()
+                buzz(longArrayOf(0, 120, 80, 120))
+            }
             if (c is Cue.Finished) {
                 buzz(longArrayOf(0, 400))
                 lifecycleScope.launch { delay(4000); finish(save = true) }
@@ -238,10 +245,16 @@ class RunService : LifecycleService() {
                     metres = odo.distanceM,
                     steps = e.results.toList(),
                     splits = e.splits.toList(),
+                    startClockMs = startClockMs,
+                    stepStartsMs = stepStarts.toList(),
                 ),
                 odo.points.toList(),
             )
             savedId = id
+            if (store.state.value.strava.let { it.connected && it.autoUpload }) {
+                val run = store.state.value.runs.first { it.id == id }
+                RunPlanApp.scope.launch { runCatching { Strava.upload(run) } }
+            }
             watch.send(e.state(paused = false, gpsOk = true))
         }
         phase = if (savedId != null) RunPhase.SAVED else RunPhase.IDLE

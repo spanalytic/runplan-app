@@ -26,12 +26,16 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import androidx.lifecycle.lifecycleScope
+import dev.runplan.app.data.Strava
+import kotlinx.coroutines.launch
 import dev.runplan.app.run.RunPhase
 import dev.runplan.app.run.RunService
 import dev.runplan.app.run.RunSession
 import dev.runplan.app.ui.home.HomeScreen
 import dev.runplan.app.ui.onboarding.OnboardingScreen
 import dev.runplan.app.ui.plan.SessionScreen
+import dev.runplan.app.ui.run.MapScreen
 import dev.runplan.app.ui.run.RunScreen
 import dev.runplan.app.ui.run.SummaryScreen
 import dev.runplan.app.ui.theme.RunPlanTheme
@@ -43,12 +47,29 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         if (intent?.getBooleanExtra(EXTRA_OPEN_RUN, false) == true) openRun.value++
+        if (savedInstanceState == null) handleStravaRedirect(intent)
         setContent { RunPlanTheme { AppRoot(openRun.value) } }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_OPEN_RUN, false)) openRun.value++
+        handleStravaRedirect(intent)
+    }
+
+    /** Strava sends the user back to runplan://localhost/strava?code=... after they approve. */
+    private fun handleStravaRedirect(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme != "runplan" || uri.path != "/strava") return
+        lifecycleScope.launch {
+            val err = Strava.handleRedirect(uri)
+            val name = RunPlanApp.store.state.value.strava.athlete
+            Toast.makeText(
+                this@MainActivity,
+                err ?: "Strava connected${if (name.isNotBlank()) " as $name" else ""}",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
     }
 
     companion object {
@@ -65,6 +86,8 @@ object Routes {
     const val RUN = "run"
     const val SUMMARY = "summary/{id}"
     fun summary(id: String) = "summary/$id"
+    const val MAP = "map/{id}"
+    fun map(id: String) = "map/$id"
 }
 
 @Composable
@@ -139,7 +162,11 @@ private fun AppRoot(openRunSignal: Int) {
                 onBack = {
                     if (!nav.popBackStack()) nav.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
                 },
+                openMap = { nav.navigate(Routes.map(it)) },
             )
+        }
+        composable(Routes.MAP) { entry ->
+            MapScreen(id = entry.arguments?.getString("id") ?: "", onBack = { nav.popBackStack() })
         }
     }
 }

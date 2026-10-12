@@ -26,6 +26,8 @@ object Geo {
 /**
  * One location fix. [speed] is the receiver's own ground speed in m/s (GNSS Doppler on most phones),
  * NaN when the fix has none; [speedAcc] is its 1-sigma accuracy in m/s, NaN when unknown.
+ * The odometer fills in [dist] (cumulative metres), [fLat]/[fLon] (filtered position) and
+ * [fSpeed] (smoothed speed, m/s) when it records the point.
  */
 data class TrackPoint(
     val tMs: Long,
@@ -35,7 +37,15 @@ data class TrackPoint(
     val acc: Float,
     val speed: Float = Float.NaN,
     val speedAcc: Float = Float.NaN,
-)
+    val dist: Double = Double.NaN,
+    val fLat: Double = Double.NaN,
+    val fLon: Double = Double.NaN,
+    val fSpeed: Double = Double.NaN,
+) {
+    /** Filtered position when available, raw otherwise. */
+    val bestLat: Double get() = if (fLat.isFinite()) fLat else lat
+    val bestLon: Double get() = if (fLon.isFinite()) fLon else lon
+}
 
 /** One axis of a constant-velocity Kalman filter: state [position, velocity] in metres. */
 private class Axis {
@@ -111,6 +121,10 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
     private fun east(lon: Double) = (lon - lon0) * mPerDegLon
     private fun north(lat: Double) = (lat - lat0) * M_PER_DEG_LAT
 
+    private fun record(p: TrackPoint) {
+        points += p.copy(dist = distanceM, fLat = lat0 + y.p / M_PER_DEG_LAT, fLon = lon0 + x.p / mPerDegLon, fSpeed = speed)
+    }
+
     private fun doppler(p: TrackPoint): Double? {
         if (!p.speed.isFinite() || p.speed < 0) return null
         if (p.speedAcc.isFinite() && p.speedAcc > 1.5f) return null
@@ -136,7 +150,7 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
             lastMs = p.tMs
             started = true
             rejects = 0
-            points += p
+            record(p)
             return true
         }
 
@@ -185,7 +199,7 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
         val alpha = 1 - exp(-dt / (if (dop != null) tauSec else tauSec * 2.5))
         speed = if (speed.isNaN()) measured else speed + alpha * (measured - speed)
 
-        points += p
+        record(p)
         return accepted
     }
 

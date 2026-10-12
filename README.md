@@ -5,7 +5,8 @@ A free, rules-based training plan and pace coach for Android, with a Galaxy Watc
 - **Plan:** answer five questions (recent race, goal, race day, run days, weekly km). You get a periodised plan of Base, Build, Peak and Taper, with training paces from the Daniels VDOT model.
 - **Run:** the phone records GPS and talks you through each step ("Rep 2 of 5, 5 minutes at 5:03 to 5:13"). It warns "speed up" or "ease off" when you leave the target band, and announces kilometre splits on easy and long runs.
 - **Watch:** shows the step, target band, current pace and time left. It buzzes on step changes and when you go off pace, and can start, pause and skip steps.
-- **History:** step-by-step results against target, with CSV and GPX export (GPX uploads to Strava and Garmin Connect).
+- **History:** step-by-step results against target, and a map of each run with the route coloured by pace zone (OpenStreetMap / CARTO tiles). Exports: GPX, TCX (one lap per step), steps CSV and raw GPS CSV.
+- **Strava:** upload a run, or every run automatically. Intervals show as laps, and the description lists each rep against its target.
 
 ## Install
 
@@ -21,6 +22,14 @@ A free, rules-based training plan and pace coach for Android, with a Galaxy Watc
       adb install runplan-watch.apk
       ```
    Updates install over the old version, because both apps are signed with the shared key in `keystore/`.
+
+## Strava setup (one-off)
+
+Strava only lets apps upload through an API app you register, which is free for personal use:
+
+1. Go to https://www.strava.com/settings/api and create an app. Any name, category and website will do.
+2. Set **Authorization Callback Domain** to `localhost`.
+3. In RunPlan, go to Settings, then Strava. Paste the **Client ID** and **Client Secret**, then tap **Connect Strava** and approve uploads.
 
 ## Use
 
