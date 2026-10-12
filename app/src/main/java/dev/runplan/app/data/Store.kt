@@ -100,17 +100,24 @@ class Store(context: Context) {
 
     private fun writeTrack(id: String, points: List<TrackPoint>) {
         File(tracks, "$id.csv").bufferedWriter().use { w ->
-            w.write("t_ms,lat,lon,alt,acc\n")
-            points.forEach { w.write("${it.tMs},${it.lat},${it.lon},${it.alt},${it.acc}\n") }
+            w.write("t_ms,lat,lon,alt,acc,speed,speed_acc\n")
+            points.forEach { w.write("${it.tMs},${it.lat},${it.lon},${it.alt},${it.acc},${it.speed},${it.speedAcc}\n") }
         }
     }
+
+    fun trackFile(id: String): File = File(tracks, "$id.csv")
 
     fun readTrack(id: String): List<TrackPoint> {
         val f = File(tracks, "$id.csv")
         if (!f.exists()) return emptyList()
         return f.readLines().drop(1).mapNotNull { line ->
             val c = line.split(',')
-            runCatching { TrackPoint(c[0].toLong(), c[1].toDouble(), c[2].toDouble(), c[3].toDouble(), c[4].toFloat()) }.getOrNull()
+            runCatching {
+                TrackPoint(
+                    c[0].toLong(), c[1].toDouble(), c[2].toDouble(), c[3].toDouble(), c[4].toFloat(),
+                    c.getOrNull(5)?.toFloatOrNull() ?: Float.NaN, c.getOrNull(6)?.toFloatOrNull() ?: Float.NaN,
+                )
+            }.getOrNull()
         }
     }
 

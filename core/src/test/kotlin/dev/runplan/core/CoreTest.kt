@@ -74,4 +74,24 @@ class CoreTest {
         assertEquals(s.pace, r.pace)
         assertEquals(s.status, r.status)
     }
+
+    @Test fun odometerIgnoresMultipathDrift() {
+        // steady walk at 1.33 m/s (12:32/km) with GPS noise and a 90 m position wander, like a real recording
+        val rnd = java.util.Random(7)
+        val o = Odometer()
+        val mPerDegLon = 111_195.0 * kotlin.math.cos(Math.toRadians(53.27))
+        var x = 0.0
+        val paces = ArrayList<Double>()
+        for (i in 1..600) {
+            x += 1.33
+            var north = 2.0 * rnd.nextGaussian()
+            if (i in 300..324) north += (i - 300) * 3.75
+            val sp = (1.33 + 0.1 * rnd.nextGaussian()).toFloat()
+            o.add(TrackPoint(i * 1000L, 53.27 + north / 111_195.0, -1.26 + (x + 2.0 * rnd.nextGaussian()) / mPerDegLon, 0.0, 6f, sp, 0.3f))
+            if (i > 30) paces += o.pace(i * 1000L)
+        }
+        val truth = 1000 / 1.33
+        assertTrue(paces.all { kotlin.math.abs(it - truth) < 90 }, "pace stayed within 90 s of truth")
+        assertEquals(1.0, o.distanceM / 798.0, 0.03)
+    }
 }

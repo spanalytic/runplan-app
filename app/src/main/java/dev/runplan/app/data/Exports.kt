@@ -59,6 +59,14 @@ object Exports {
         share(ctx, f, "text/csv", "Export steps")
     }
 
+    /** Raw GPS fixes (time, position, accuracy, Doppler speed) as CSV. */
+    fun trackCsv(ctx: Context, r: RunRecord, source: File) {
+        if (!source.exists()) return
+        val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}_track.csv")
+        source.copyTo(f, overwrite = true)
+        share(ctx, f, "text/csv", "Export GPS track")
+    }
+
     /** GPX track for Strava, Garmin Connect etc. Times are reconstructed from the run's wall-clock start. */
     fun gpx(ctx: Context, r: RunRecord, points: List<TrackPoint>) {
         if (points.isEmpty()) return

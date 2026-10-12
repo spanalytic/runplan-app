@@ -62,7 +62,18 @@ class RunService : LifecycleService() {
     private var locationManager: LocationManager? = null
 
     private val locationListener = LocationListener { loc: Location ->
-        odo.add(TrackPoint(loc.elapsedRealtimeNanos / 1_000_000, loc.latitude, loc.longitude, loc.altitude, loc.accuracy))
+        odo.add(
+            TrackPoint(
+                tMs = loc.elapsedRealtimeNanos / 1_000_000,
+                lat = loc.latitude,
+                lon = loc.longitude,
+                alt = loc.altitude,
+                acc = loc.accuracy,
+                // GNSS Doppler speed: far steadier than speed derived from positions
+                speed = if (loc.hasSpeed()) loc.speed else Float.NaN,
+                speedAcc = if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond else Float.NaN,
+            ),
+        )
     }
 
     override fun onCreate() {

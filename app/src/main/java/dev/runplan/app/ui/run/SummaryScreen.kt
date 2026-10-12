@@ -26,7 +26,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -121,14 +120,14 @@ fun SummaryScreen(id: String, onBack: () -> Unit) {
             TextButton(onClick = { confirmDelete = true }) { Text("Delete run", color = MaterialTheme.colorScheme.error) }
             Spacer(Modifier.height(12.dp))
         }
-        Row(Modifier.fillMaxWidth().padding(20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { Exports.gpx(ctx, r, RunPlanApp.store.readTrack(r.id)) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(52.dp)) {
-                Text("GPX")
-            }
-            OutlinedButton(onClick = { Exports.stepsCsv(ctx, r) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.height(52.dp)) {
-                Text("CSV")
-            }
-            Button(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).height(52.dp)) { Text("Done") }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Export", style = MaterialTheme.typography.bodyMedium, color = Palette.Slate, modifier = Modifier.padding(start = 8.dp, end = 4.dp))
+            TextButton(onClick = { Exports.gpx(ctx, r, RunPlanApp.store.readTrack(r.id)) }) { Text("GPX") }
+            TextButton(onClick = { Exports.stepsCsv(ctx, r) }) { Text("Steps CSV") }
+            TextButton(onClick = { Exports.trackCsv(ctx, r, RunPlanApp.store.trackFile(r.id)) }) { Text("GPS CSV") }
+        }
+        Button(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 20.dp).height(52.dp)) {
+            Text("Done")
         }
     }
 
