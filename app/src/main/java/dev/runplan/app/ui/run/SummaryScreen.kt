@@ -231,20 +231,15 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
             Spacer(Modifier.height(24.dp))
             Spacer(Modifier.height(12.dp))
         }
-        StravaRow(
-            run = r,
-            hasTrack = track.size >= 2,
-            message = stravaMessage,
-            onUpload = {
-                stravaMessage = runCatching { Strava.sendViaWeb(ctx, r, track) }.fold(
-                    { name -> "Saved $name to Downloads. On the Strava page, choose it as the file to upload. If you see Strava's mobile page instead, switch your browser to Desktop site." },
-                    { e -> e.message ?: "Couldn't save the file." },
-                )
-            },
+    }
+
+    stravaMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { stravaMessage = null },
+            title = { Text("Upload to Strava") },
+            text = { Text(msg) },
+            confirmButton = { TextButton(onClick = { stravaMessage = null }) { Text("OK") } },
         )
-        Button(onClick = onBack, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 20.dp).height(52.dp)) {
-            Text("Done")
-        }
     }
 
     if (confirmDelete && r != null) {
@@ -270,22 +265,6 @@ private fun Big(value: String, label: String) {
     }
 }
 
-@Composable
-private fun StravaRow(run: RunRecord, hasTrack: Boolean, message: String?, onUpload: () -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp)) {
-        if (hasTrack) {
-            OutlinedButton(onClick = onUpload, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text(if (run.sentToStrava) "Upload to Strava again" else "Upload to Strava", color = StravaOrange)
-            }
-        } else {
-            Text("No GPS track, so there's nothing to upload to Strava.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
-        }
-        if (message != null) Text(message, style = MaterialTheme.typography.bodySmall, color = Palette.Slate, modifier = Modifier.padding(top = 6.dp))
-        Spacer(Modifier.height(8.dp))
-    }
-}
-
-private val StravaOrange = androidx.compose.ui.graphics.Color(0xFFFC4C02)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
