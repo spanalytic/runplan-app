@@ -146,9 +146,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     }
                     Spacer(Modifier.height(28.dp))
                     if (vdotOk) {
-                        Text("Fitness score (VDOT) ${"%.1f".format(vdot)}", style = MaterialTheme.typography.titleSmall)
-                        Spacer(Modifier.height(8.dp))
-                        Text("That predicts", style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
+                        Text("That predicts", style = MaterialTheme.typography.titleSmall)
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                             listOf(Distance.K5, Distance.K10, Distance.HALF, Distance.MARATHON).forEach { d ->

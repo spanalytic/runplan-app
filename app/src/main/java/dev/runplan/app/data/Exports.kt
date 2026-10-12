@@ -10,6 +10,7 @@ import dev.runplan.core.RunStat
 import dev.runplan.core.Fmt
 import dev.runplan.core.Lap
 import dev.runplan.core.TrackPoint
+import dev.runplan.core.Vdot
 import java.io.File
 import java.time.LocalDate
 
@@ -68,16 +69,16 @@ object Exports {
         share(ctx, f, "text/csv", "Export weekly distance")
     }
 
-    /** Every best effort in every run, with VDOT. */
+    /** Every best effort in every run, with the 5K time it predicts. */
     fun effortsCsv(ctx: Context, runs: List<RunRecord>) {
         val f = File(dir(ctx), "runplan_best_efforts.csv")
         f.bufferedWriter().use { w ->
-            w.write("date,run_title,effort,distance_m,time_sec,pace_sec_per_km,vdot\n")
+            w.write("date,run_title,effort,distance_m,time_sec,pace_sec_per_km,predicted_5k_sec\n")
             runs.sortedBy { it.startMs }.forEach { r ->
                 r.efforts.orEmpty().forEach { e ->
                     w.write(listOf(
                         LocalDate.ofEpochDay(r.epochDay).toString(), csvCell(r.title), e.label, n(e.metres, 1),
-                        n(e.sec, 1), n(e.pace, 1), if (e.metres >= 1600) n(e.vdot, 1) else "",
+                        n(e.sec, 1), n(e.pace, 1), if (e.metres >= 1600) n(Vdot.predictTime(e.vdot, 5000.0), 0) else "",
                     ).joinToString(",") + "\n")
                 }
             }

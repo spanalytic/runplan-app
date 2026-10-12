@@ -63,7 +63,8 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
         if (p != null && profile != null) {
             Section("Your paces")
             Text(
-                "From your ${profile.recentDistance.label} in ${Fmt.duration(profile.recentSec)}, VDOT ${"%.1f".format(p.vdot)}.",
+                "Based on your ${profile.recentDistance.label} in ${Fmt.duration(profile.recentSec)}. " +
+                    "Predicted ${profile.goal.label}: ${Fmt.duration(Vdot.predictTime(p.vdot, profile.goal.distance.metres))}.",
                 style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
             )
             Spacer(Modifier.height(8.dp))
@@ -176,7 +177,9 @@ private fun UpdateFitnessDialog(onDismiss: () -> Unit, onSave: (Distance, Double
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    if (ok) "New VDOT ${"%.1f".format(v)}" else if (sec > 0) "That time looks off for a ${d.label}." else "",
+                    if (ok) "Predicts 5K ${Fmt.duration(Vdot.predictTime(v, 5000.0))}, 10K ${Fmt.duration(Vdot.predictTime(v, 10000.0))}, " +
+                        "half ${Fmt.duration(Vdot.predictTime(v, 21097.5))}"
+                    else if (sec > 0) "That time looks off for a ${d.label}." else "",
                     style = MaterialTheme.typography.bodyMedium, color = if (ok) Palette.Slate else MaterialTheme.colorScheme.error,
                 )
             }

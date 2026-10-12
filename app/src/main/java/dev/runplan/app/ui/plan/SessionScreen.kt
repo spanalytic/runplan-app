@@ -73,7 +73,7 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
             Spacer(Modifier.height(24.dp))
             WorkoutShape(bars(w, p), height = 96.dp)
             Spacer(Modifier.height(16.dp))
-            Text("About %.1f km and %d min".format(km, min.roundToInt()), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
+            Text("Takes about ${Fmt.estimate(min * 60)}, %.1f km".format(km), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
             Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = Palette.Line)
             w.blocks.forEach { b ->

@@ -146,7 +146,8 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, openSession: (St
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
             Stat("%.1f".format(km), "km")
-            Stat("${min.roundToInt()}", "min")
+            if (min < 90) Stat("${min.roundToInt()}", "min")
+            else Stat("${min.roundToInt() / 60}:${(min.roundToInt() % 60).toString().padStart(2, '0')}", "h")
             if (w.note.isNotEmpty()) Text(w.note, style = MaterialTheme.typography.bodySmall, color = Palette.Slate, modifier = Modifier.align(Alignment.CenterVertically))
         }
         Spacer(Modifier.height(20.dp))
@@ -180,13 +181,14 @@ private fun Stat(value: String, unit: String) {
 @Composable
 private fun WeekHeader(p: Plan, week: Int, ws: List<Workout>) {
     val km = ws.sumOf { it.estimate(p.paces).first }
+    val min = ws.sumOf { it.estimate(p.paces).second }
     Column {
         Spacer(Modifier.height(20.dp))
         Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
             Text("Week $week", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.width(10.dp))
             Text(ws.first().phase.label, style = MaterialTheme.typography.bodyMedium, color = Palette.Slate, modifier = Modifier.weight(1f).padding(bottom = 2.dp))
-            Text("${km.roundToInt()} km", style = MaterialTheme.typography.labelMedium, color = Palette.Slate, modifier = Modifier.padding(bottom = 3.dp))
+            Text("${km.roundToInt()} km, ${Fmt.estimate(min * 60)}", style = MaterialTheme.typography.labelMedium, color = Palette.Slate, modifier = Modifier.padding(bottom = 3.dp))
         }
         Spacer(Modifier.height(8.dp))
         HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = Palette.Line)
@@ -209,10 +211,14 @@ private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onC
             Text(w.type.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
             Text(Fmt.summary(w), style = MaterialTheme.typography.bodySmall, color = Palette.Slate, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (done) {
-            Icon(Icons.Filled.Check, contentDescription = "Done", tint = Palette.Good, modifier = Modifier.size(22.dp))
-        } else {
-            WorkoutShape(bars(w, p.paces), modifier = Modifier.width(64.dp), height = 22.dp, gap = 1.dp)
+        Column(Modifier.width(72.dp), horizontalAlignment = Alignment.End) {
+            if (done) {
+                Icon(Icons.Filled.Check, contentDescription = "Done", tint = Palette.Good, modifier = Modifier.size(22.dp))
+            } else {
+                WorkoutShape(bars(w, p.paces), height = 22.dp, gap = 1.dp)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(Fmt.estimate(w.estimate(p.paces).second * 60), style = MaterialTheme.typography.labelMedium, color = Palette.Slate)
         }
     }
 }

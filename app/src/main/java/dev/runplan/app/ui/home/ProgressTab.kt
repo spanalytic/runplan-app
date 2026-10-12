@@ -52,7 +52,7 @@ private val dayMonth = DateTimeFormatter.ofPattern("d MMM", Locale.UK)
 private val shortDay = DateTimeFormatter.ofPattern("d/M", Locale.UK)
 private val monthName = DateTimeFormatter.ofPattern("MMM", Locale.UK)
 
-/** Effort label -> the Distance used for plan paces. 1 km is too short for VDOT. */
+/** Effort label -> the Distance used for plan paces. 1 km is too short to predict race times from. */
 private val effortDistance = mapOf(
     "1 mile" to Distance.MILE, "5K" to Distance.K5, "10K" to Distance.K10,
     "Half" to Distance.HALF, "Marathon" to Distance.MARATHON,
@@ -121,41 +121,39 @@ private fun Stat(value: String, label: String) {
 
 @Composable
 private fun Fitness(runs: List<RunRecord>, plan: Plan?, today: Long) {
-    // each run's strongest effort (mile and up), as VDOT
+    // fitness is tracked internally as VDOT but always shown as a predicted race time
+    val goal = plan?.profile?.goal?.distance ?: Distance.K5
+    val goalName = plan?.profile?.goal?.label?.lowercase()?.replace("5k", "5K")?.replace("10k", "10K") ?: "5K"
+    fun predicted(v: Double) = Vdot.predictTime(v, goal.metres)
+
     val points = remember(runs) {
         runs.mapNotNull { r -> Analytics.fitness(r.efforts.orEmpty())?.let { Dated(it, r) } }.sortedBy { it.run.epochDay }
     }
-    Section("Fitness", "VDOT from your best effort of a mile or more in the last 6 weeks")
+    Section("Fitness", "Your predicted $goalName time, from your best effort of a mile or more in the last 6 weeks")
     val recent = points.filter { it.run.epochDay > today - 42 }.maxByOrNull { it.effort.vdot }
-    val planVdot = plan?.paces?.vdot
+    val planScore = plan?.paces?.vdot
     if (recent == null) {
         Text(
-            "Run something hard over a mile or more, like a race, time trial or parkrun, and your fitness estimate shows here.",
+            "Run something hard over a mile or more, like a race, time trial or parkrun, and your predicted race time shows here.",
             style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
         )
     } else {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text("%.1f".format(recent.effort.vdot), style = MaterialTheme.typography.displayMedium)
-            Spacer(Modifier.width(10.dp))
-            Text("VDOT", style = MaterialTheme.typography.titleMedium, color = Palette.Slate, modifier = Modifier.padding(bottom = 8.dp))
-        }
+        Text(Fmt.duration(predicted(recent.effort.vdot)), style = MaterialTheme.typography.displayMedium)
         Text(
-            "From your ${recent.effort.label} in ${Fmt.duration(recent.effort.sec)} on ${LocalDate.ofEpochDay(recent.run.epochDay).format(dayMonth)}." +
-                (planVdot?.let { " Your plan's paces use %.1f.".format(it) } ?: ""),
+            "Based on your ${recent.effort.label} in ${Fmt.duration(recent.effort.sec)} on ${LocalDate.ofEpochDay(recent.run.epochDay).format(dayMonth)}." +
+                (planScore?.let { " Your plan's paces are set for ${Fmt.duration(predicted(it))}." } ?: ""),
             style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
         )
         val dist = effortDistance[recent.effort.label]
         val profile = plan?.profile
-        if (planVdot != null && profile != null && dist != null && recent.effort.vdot > planVdot + 0.5) {
+        if (planScore != null && profile != null && dist != null && recent.effort.vdot > planScore + 0.5) {
             Spacer(Modifier.height(12.dp))
+            Text("You're running faster than your plan expects.", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = { RunPlanApp.store.setProfile(profile.copy(recentDistance = dist, recentSec = recent.effort.sec)) },
                 shape = RoundedCornerShape(12.dp),
-            ) { Text("Update my paces to VDOT %.1f".format(recent.effort.vdot)) }
-            Text(
-                "Predicts ${profile.goal.label} in ${Fmt.duration(Vdot.predictTime(recent.effort.vdot, profile.goal.distance.metres))}.",
-                style = MaterialTheme.typography.bodySmall, color = Palette.Slate, modifier = Modifier.padding(top = 6.dp),
-            )
+            ) { Text("Update my paces") }
         }
     }
 
@@ -163,8 +161,9 @@ private fun Fitness(runs: List<RunRecord>, plan: Plan?, today: Long) {
     if (points.size >= 2) {
         val first = Analytics.mondayOf(points.first().run.epochDay)
         val days = generateSequence(first + 6) { it + 7 }.takeWhile { it <= today + 6 }.toList()
-        val series = remember(points, today) {
-            Analytics.rollingBest(points.map { it.run.epochDay to it.effort.vdot }, days).map { (d, v) -> d.toDouble() to v }
+        val series = remember(points, today, goal) {
+            Analytics.rollingBest(points.map { it.run.epochDay to it.effort.vdot }, days)
+                .map { (d, v) -> d.toDouble() to predicted(v) }
         }
         if (series.size >= 2) {
             Spacer(Modifier.height(16.dp))
@@ -173,9 +172,11 @@ private fun Fitness(runs: List<RunRecord>, plan: Plan?, today: Long) {
                 height = 140.dp,
                 colorAt = { Palette.Signal },
                 dots = series.size <= 26,
-                yFormat = { "%.0f".format(it) },
+                invertY = true,
+                yTicks = listOf(10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0),
+                yFormat = { Fmt.duration(it) },
                 xFormat = { LocalDate.ofEpochDay(it.toLong()).format(dayMonth) },
-                inspect = { i -> "Week to ${LocalDate.ofEpochDay(series[i].first.toLong()).format(dayMonth)}: VDOT %.1f".format(series[i].second) },
+                inspect = { i -> "Week to ${LocalDate.ofEpochDay(series[i].first.toLong()).format(dayMonth)}: ${Fmt.duration(series[i].second)}" },
             )
         }
     }

@@ -30,6 +30,16 @@ object Fmt {
 
     fun km(metres: Double, decimals: Int = 2): String = "%.${decimals}f".format(metres / 1000)
 
+    /** Rough duration for planning, to the nearest 5 minutes: "45 min", "1 h 25 min", "2 h". */
+    fun estimate(sec: Double): String {
+        val m = (Math.round(sec / 300.0) * 5).coerceAtLeast(5)
+        return when {
+            m < 60 -> "$m min"
+            m % 60 == 0L -> "${m / 60} h"
+            else -> "${m / 60} h ${m % 60} min"
+        }
+    }
+
     fun minutes(sec: Double): String {
         val m = sec / 60
         return if (m == m.toLong().toDouble()) "${m.toLong()} min" else "%.1f min".format(m)
