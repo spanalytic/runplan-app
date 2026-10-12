@@ -48,7 +48,11 @@ import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.Exports
 import dev.runplan.app.data.RunRecord
 import dev.runplan.app.data.Strava
+import dev.runplan.app.ui.components.LineChart
 import dev.runplan.app.ui.components.RouteMap
+import dev.runplan.app.ui.components.SplitBars
+import dev.runplan.core.Analytics
+import dev.runplan.core.Effort
 import dev.runplan.core.PaceZones
 import dev.runplan.core.Paces
 import dev.runplan.core.TrackPoint
@@ -108,6 +112,40 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                 Text("${targeted.count { it }} of ${targeted.size} paced steps on target", style = MaterialTheme.typography.titleMedium)
             }
 
+            val paceData = remember(track) { Analytics.paceSeries(track) }
+            if (paceData.count { it.second.isFinite() } > 10) {
+                Spacer(Modifier.height(28.dp))
+                Text("Pace", style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(4.dp))
+                LineChart(
+                    data = paceData,
+                    colorAt = { i -> Palette.zone(plan?.paces?.let { PaceZones.of(paceData[i].second, it) } ?: Zone.E) },
+                    invertY = true,
+                    robust = true,
+                    yTicks = listOf(15.0, 30.0, 60.0, 120.0, 300.0),
+                    yFormat = { Fmt.pace(it) },
+                    xFormat = { "${(it / 60).toInt()} min" },
+                    inspect = { i -> "${Fmt.duration(paceData[i].first)}, ${Fmt.pace(paceData[i].second)}/km" },
+                )
+            }
+            val elev = remember(track) { Analytics.elevationSeries(track) }
+            val elevRange = elev.maxOfOrNull { it.second }?.minus(elev.minOf { it.second }) ?: 0.0
+            if (elev.size > 10 && elevRange > 3) {
+                Spacer(Modifier.height(28.dp))
+                Text("Elevation", style = MaterialTheme.typography.headlineSmall)
+                if (r.ascentM.isFinite()) Text("${r.ascentM.toInt()} m of climb", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                Spacer(Modifier.height(4.dp))
+                LineChart(
+                    data = elev,
+                    height = 120.dp,
+                    colorAt = { Palette.Slate },
+                    area = true,
+                    yFormat = { "${it.toInt()} m" },
+                    xFormat = { "%.1f km".format(it) },
+                    inspect = { i -> "%.2f km, %d m".format(elev[i].first, elev[i].second.toInt()) },
+                )
+            }
+
             Spacer(Modifier.height(24.dp))
             Text("Steps", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
@@ -136,14 +174,34 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
             }
 
             if (r.splits.isNotEmpty()) {
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(28.dp))
                 Text("Kilometre splits", style = MaterialTheme.typography.headlineSmall)
-                Spacer(Modifier.height(8.dp))
-                r.splits.forEachIndexed { i, sec ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                        Text("${i + 1}", style = MaterialTheme.typography.titleSmall, color = Palette.Slate, modifier = Modifier.width(40.dp))
-                        Text(Fmt.pace(sec), style = MaterialTheme.typography.titleMedium)
+                Text("Longer bar is faster; the dot marks your fastest.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                Spacer(Modifier.height(10.dp))
+                SplitBars(r.splits) { sec -> Palette.zone(plan?.paces?.let { PaceZones.of(sec, it) } ?: Zone.E) }
+            }
+
+            val efforts = r.efforts.orEmpty()
+            if (efforts.isNotEmpty()) {
+                val bests = remember(state.runs) {
+                    state.runs.flatMap { run -> run.efforts.orEmpty().map { it to run } }
+                        .groupBy { it.first.label }
+                        .mapValues { (_, xs) -> xs.minWith(compareBy<Pair<Effort, RunRecord>> { it.first.sec }.thenBy { it.second.startMs }).second.id }
+                }
+                Spacer(Modifier.height(28.dp))
+                Text("Best efforts", style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(4.dp))
+                efforts.forEach { e ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(e.label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.width(80.dp))
+                        Text(Fmt.duration(e.sec), style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                        Text("${Fmt.pace(e.pace)}/km", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                        if (bests[e.label] == r.id) {
+                            Spacer(Modifier.width(10.dp))
+                            Text("Best ever", style = MaterialTheme.typography.labelMedium, color = Palette.Signal)
+                        }
                     }
+                    HorizontalDivider(color = Palette.Line)
                 }
             }
             Spacer(Modifier.height(24.dp))

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Insights
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,7 +32,12 @@ fun HomeScreen(
     newPlan: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val tabs = listOf("Plan" to Icons.Outlined.CalendarMonth, "Runs" to Icons.Outlined.History, "Settings" to Icons.Outlined.Tune)
+    val tabs = listOf(
+        "Plan" to Icons.Outlined.CalendarMonth,
+        "Runs" to Icons.Outlined.History,
+        "Progress" to Icons.Outlined.Insights,
+        "Settings" to Icons.Outlined.Tune,
+    )
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
@@ -58,6 +64,7 @@ fun HomeScreen(
         when (tab) {
             0 -> PlanTab(m, openSession, startRun, resumeRun)
             1 -> RunsTab(m, openRun)
+            2 -> ProgressTab(m, openRun)
             else -> SettingsTab(m, editPlan, newPlan)
         }
     }

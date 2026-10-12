@@ -7,6 +7,7 @@ import dev.runplan.app.data.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import org.osmdroid.config.Configuration
 import java.io.File
 
@@ -23,6 +24,7 @@ class RunPlanApp : Application() {
             osmdroidBasePath = File(cacheDir, "osmdroid")
             osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
         }
+        scope.launch(Dispatchers.IO) { runCatching { store.backfillAnalytics() } }
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL_RUN, "Active run", NotificationManager.IMPORTANCE_LOW).apply {
                 description = "Shows your current step and pace while a run is recording"

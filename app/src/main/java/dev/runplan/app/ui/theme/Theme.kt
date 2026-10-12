@@ -24,14 +24,16 @@ object Palette {
     val Amber = Color(0xFFE2A93B)
     val Good = Color(0xFF3F9C7A)
 
-    /** Cool-to-hot ramp: the zone colour carries the intensity. */
+    /**
+     * Zone colours, validated for colour-blind separation and normal-vision distance
+     * (dataviz validator, light surface). M and HM share a hue: a plan uses one or the other.
+     */
     fun zone(z: Zone?): Color = when (z) {
-        Zone.E -> Color(0xFF8DBFA9)
-        Zone.M -> Color(0xFF5B95C9)
-        Zone.HM -> Color(0xFF4373C9)
-        Zone.T -> Color(0xFFE2A93B)
-        Zone.I -> Color(0xFFE5603C)
-        Zone.R -> Color(0xFFA54FC0)
+        Zone.E -> Color(0xFF43A86F)
+        Zone.M, Zone.HM -> Color(0xFF3C7DD9)
+        Zone.T -> Color(0xFFD99A1C)
+        Zone.I -> Color(0xFFE2512E)
+        Zone.R -> Color(0xFFA447C9)
         Zone.G -> Signal
         null -> Color(0xFFC3CAD3)
     }

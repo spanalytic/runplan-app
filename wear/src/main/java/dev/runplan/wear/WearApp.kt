@@ -53,12 +53,11 @@ private fun style(size: Int, weight: FontWeight = FontWeight.SemiBold) =
     TextStyle(fontFamily = Condensed, fontWeight = weight, fontSize = size.sp, lineHeight = (size + 2).sp, fontFeatureSettings = "tnum", textAlign = TextAlign.Center)
 
 private fun zoneColor(code: String): Color = when (code) {
-    "E" -> Color(0xFF8DBFA9)
-    "M" -> Color(0xFF5B95C9)
-    "HM" -> Color(0xFF4373C9)
-    "T" -> Color(0xFFE2A93B)
-    "I" -> Color(0xFFE5603C)
-    "R" -> Color(0xFFA54FC0)
+    "E" -> Color(0xFF43A86F)
+    "M", "HM" -> Color(0xFF3C7DD9)
+    "T" -> Color(0xFFD99A1C)
+    "I" -> Color(0xFFE2512E)
+    "R" -> Color(0xFFA447C9)
     "G" -> Signal
     else -> Color(0xFFC3CAD3)
 }

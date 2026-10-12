@@ -233,6 +233,7 @@ class RunService : LifecycleService() {
         if (save && e != null && phase != RunPhase.READY) {
             e.finish()
             val id = startWallMs.toString()
+            val (efforts, ascent) = store.analyse(odo.points)
             store.addRun(
                 RunRecord(
                     id = id,
@@ -246,6 +247,8 @@ class RunService : LifecycleService() {
                     splits = e.splits.toList(),
                     startClockMs = startClockMs,
                     stepStartsMs = stepStarts.toList(),
+                    efforts = efforts,
+                    ascentM = ascent,
                 ),
                 odo.points.toList(),
             )

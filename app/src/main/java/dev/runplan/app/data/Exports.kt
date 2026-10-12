@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
 import dev.runplan.core.ActivityFiles
+import dev.runplan.core.Analytics
+import dev.runplan.core.Plan
+import dev.runplan.core.RunStat
 import dev.runplan.core.Fmt
 import dev.runplan.core.Lap
 import dev.runplan.core.TrackPoint
@@ -39,6 +42,47 @@ object Exports {
             }
         }
         share(ctx, f, "text/csv", "Export runs")
+    }
+
+    /** One row per week from the first run to this week, with planned km where a plan covers it. */
+    fun weeklyCsv(ctx: Context, runs: List<RunRecord>, plan: Plan?) {
+        if (runs.isEmpty()) return
+        val today = LocalDate.now().toEpochDay()
+        val weeks = ((Analytics.mondayOf(today) - Analytics.mondayOf(runs.minOf { it.epochDay })) / 7 + 1).toInt()
+        val periods = Analytics.weekly(runs.map { RunStat(it.epochDay, it.metres, it.sec) }, today, weeks)
+        val f = File(dir(ctx), "runplan_weekly.csv")
+        f.bufferedWriter().use { w ->
+            w.write("week_start,runs,distance_km,duration_sec,avg_pace_sec_per_km,planned_km\n")
+            periods.forEach { p ->
+                val planned = plan?.let { pl ->
+                    pl.workouts.filter { it.epochDay in p.startEpochDay until p.startEpochDay + 7 }
+                        .takeIf { it.isNotEmpty() }?.sumOf { it.estimate(pl.paces).first }
+                }
+                val pace = if (p.metres > 0) p.sec / (p.metres / 1000) else Double.NaN
+                w.write(listOf(
+                    LocalDate.ofEpochDay(p.startEpochDay).toString(), p.runs.toString(), n(p.metres / 1000, 2),
+                    n(p.sec, 0), n(pace, 0), planned?.let { n(it, 1) } ?: "",
+                ).joinToString(",") + "\n")
+            }
+        }
+        share(ctx, f, "text/csv", "Export weekly distance")
+    }
+
+    /** Every best effort in every run, with VDOT. */
+    fun effortsCsv(ctx: Context, runs: List<RunRecord>) {
+        val f = File(dir(ctx), "runplan_best_efforts.csv")
+        f.bufferedWriter().use { w ->
+            w.write("date,run_title,effort,distance_m,time_sec,pace_sec_per_km,vdot\n")
+            runs.sortedBy { it.startMs }.forEach { r ->
+                r.efforts.orEmpty().forEach { e ->
+                    w.write(listOf(
+                        LocalDate.ofEpochDay(r.epochDay).toString(), csvCell(r.title), e.label, n(e.metres, 1),
+                        n(e.sec, 1), n(e.pace, 1), if (e.metres >= 1600) n(e.vdot, 1) else "",
+                    ).joinToString(",") + "\n")
+                }
+            }
+        }
+        share(ctx, f, "text/csv", "Export best efforts")
     }
 
     /** One row per step of one run. */

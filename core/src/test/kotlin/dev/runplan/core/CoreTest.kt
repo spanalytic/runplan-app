@@ -94,4 +94,28 @@ class CoreTest {
         assertTrue(paces.all { kotlin.math.abs(it - truth) < 90 }, "pace stayed within 90 s of truth")
         assertEquals(1.0, o.distanceM / 798.0, 0.03)
     }
+
+    @Test fun bestEffortsFindFastestStretch() {
+        // 1 km at 6:00/km then 5 km at 5:00/km: best 5K should be the 25:00 stretch, not from the start
+        val o = Odometer()
+        val mLon = 111_195.0 * kotlin.math.cos(Math.toRadians(53.27))
+        var x = 0.0
+        for (i in 1..1860) {
+            val v = if (i <= 360) 1000 / 360.0 else 1000 / 300.0
+            x += v
+            o.add(TrackPoint(i * 1000L, 53.27, -1.26 + x / mLon, 50.0, 5f, v.toFloat(), 0.2f))
+        }
+        val e = Analytics.bestEfforts(o.points).associateBy { it.label }
+        assertEquals(1500.0, e.getValue("5K").sec, 5.0)
+        assertEquals(300.0, e.getValue("1 km").sec, 3.0)
+        assertEquals("5K", Analytics.fitness(e.values.toList())?.label)
+    }
+
+    @Test fun weeklyBucketsAreMondayBased() {
+        val today = LocalDate.parse("2026-10-14").toEpochDay()   // a Wednesday
+        val w = Analytics.weekly(listOf(RunStat(today, 5000.0, 1500.0), RunStat(today - 9, 3000.0, 900.0)), today, 2)
+        assertEquals(LocalDate.parse("2026-10-12").toEpochDay(), w.last().startEpochDay)
+        assertEquals(5000.0, w.last().metres)
+        assertEquals(3000.0, w.first().metres)
+    }
 }

@@ -1,7 +1,9 @@
 package dev.runplan.app.data
 
 import android.content.Context
+import dev.runplan.core.Analytics
 import dev.runplan.core.Distance
+import dev.runplan.core.Effort
 import dev.runplan.core.Goal
 import dev.runplan.core.Plan
 import dev.runplan.core.PlanBuilder
@@ -34,6 +36,8 @@ data class RunRecord(
     val startClockMs: Long = 0,                 // elapsedRealtime at start, same clock as track points
     val stepStartsMs: List<Long> = emptyList(), // elapsedRealtime at the start of each step
     val sentToStrava: Boolean = false,
+    val efforts: List<Effort>? = null,          // null until computed from the track
+    val ascentM: Double = Double.NaN,
 ) {
     val pace: Double get() = if (metres > 50) sec / (metres / 1000) else Double.NaN
 }
@@ -74,6 +78,20 @@ class Store(context: Context) {
     fun setProfile(p: Profile?) = update { it.copy(profile = p) }
     fun setDone(id: String, done: Boolean) = update { it.copy(done = if (done) it.done + id else it.done - id) }
     fun setSettings(s: Settings) = update { it.copy(settings = s) }
+    /** Derived numbers for a track: best efforts and climb. */
+    fun analyse(points: List<TrackPoint>): Pair<List<Effort>, Double> =
+        Analytics.bestEfforts(points) to Analytics.ascent(points)
+
+    /** Fills in best efforts / climb for runs saved before analytics existed. Call off the main thread. */
+    fun backfillAnalytics() {
+        val missing = _state.value.runs.filter { it.efforts == null }
+        if (missing.isEmpty()) return
+        val done = missing.associate { r -> r.id to analyse(readTrack(r.id)) }
+        update { st ->
+            st.copy(runs = st.runs.map { r -> done[r.id]?.let { (e, a) -> r.copy(efforts = e, ascentM = a) } ?: r })
+        }
+    }
+
     fun markSentToStrava(runId: String) = update { st ->
         st.copy(runs = st.runs.map { if (it.id == runId) it.copy(sentToStrava = true) else it })
     }
@@ -181,6 +199,12 @@ class Store(context: Context) {
                         put("startClockMs", r.startClockMs)
                         put("stepStartsMs", JSONArray(r.stepStartsMs))
                         put("sentToStrava", r.sentToStrava)
+                        put("ascentM", num(r.ascentM))
+                        r.efforts?.let { es ->
+                            put("efforts", JSONArray().apply {
+                                es.forEach { e -> put(JSONObject().put("label", e.label).put("metres", e.metres).put("sec", e.sec)) }
+                            })
+                        }
                         put("steps", JSONArray().apply {
                             r.steps.forEach { st ->
                                 put(JSONObject().apply {
@@ -239,6 +263,13 @@ class Store(context: Context) {
                         startClockMs = r.optLong("startClockMs", 0),
                         stepStartsMs = r.optJSONArray("stepStartsMs")?.let { sa -> (0 until sa.length()).map { j -> sa.getLong(j) } } ?: emptyList(),
                         sentToStrava = r.optBoolean("sentToStrava") || !r.isNull("stravaId"),
+                        ascentM = if (r.isNull("ascentM")) Double.NaN else r.getDouble("ascentM"),
+                        efforts = r.optJSONArray("efforts")?.let { ea ->
+                            (0 until ea.length()).map { k ->
+                                val e = ea.getJSONObject(k)
+                                Effort(e.getString("label"), e.getDouble("metres"), e.getDouble("sec"))
+                            }
+                        },
                     )
                 }
             } ?: emptyList()
