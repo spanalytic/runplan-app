@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.runplan.app.RunPlanApp
+import dev.runplan.app.data.BugReport
 import dev.runplan.app.data.Updater
 import kotlinx.coroutines.launch
 import dev.runplan.app.ui.theme.Palette
@@ -126,6 +127,7 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
 
         Section("App")
         AppUpdate()
+        ReportProblem()
 
         Section("Plan")
         Action("Start a new plan", "Clears this plan. Your run history is kept.") { confirmNew = true }
@@ -265,5 +267,23 @@ private fun AppUpdate() {
             else "First allow RunPlan to install apps on the screen that opens, then come back and tap again",
         ) { install(st.apk) }
         is UpdateState.Failed -> Action("Update failed", "${st.message} Tap to try again.") { check() }
+    }
+}
+
+@Composable
+private fun ReportProblem() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val version = remember { Updater.installed(ctx).name }
+    var crash by remember { mutableStateOf(BugReport.lastCrash(ctx)) }
+    Action(
+        "Report a problem",
+        if (crash != null) "Opens a GitHub issue with your version, phone and the crash from ${crash!!.whenText}"
+        else "Opens a GitHub issue with your version and phone filled in",
+    ) { BugReport.open(ctx, version) }
+    if (crash != null) {
+        Action("Clear crash report", "Once you've reported it") {
+            BugReport.clearCrash(ctx)
+            crash = null
+        }
     }
 }

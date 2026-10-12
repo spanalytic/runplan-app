@@ -3,6 +3,7 @@ package dev.runplan.app
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import dev.runplan.app.data.BugReport
 import dev.runplan.app.data.Store
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,7 @@ class RunPlanApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        BugReport.install(this)
         instance = this
         store = Store(this)
         Configuration.getInstance().apply {
