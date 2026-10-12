@@ -51,6 +51,24 @@ object Vdot {
         return (lo + hi) / 2
     }
 
+    /**
+     * Realistic race-day fitness range if the plan is followed for [weeks] more weeks.
+     * Rule of thumb: about one VDOT point per 4 to 6 weeks of consistent training for
+     * recreational runners, less for runners who are already fit, capped at +5.
+     * This is an estimate for motivation, never used to set training paces.
+     */
+    fun projected(vdot: Double, weeks: Int): Pair<Double, Double> {
+        val train = (weeks - 1).coerceAtLeast(0).toDouble()     // race week adds no fitness
+        val scale = when { vdot < 40 -> 1.0; vdot < 50 -> 0.75; else -> 0.5 }
+        return (vdot + minOf(4.0, train / 6 * scale)) to (vdot + minOf(5.0, train / 4 * scale))
+    }
+
+    /** Race time rounded to a sensible precision for the distance (5 s for 5K up to 1 min for a marathon). */
+    fun roundTime(sec: Double, distM: Double): Double {
+        val step = when { distM <= 5000 -> 5.0; distM <= 10000 -> 15.0; distM <= 21100 -> 30.0; else -> 60.0 }
+        return Math.round(sec / step) * step
+    }
+
     /** Pace (s/km) at a fraction of VO2max. */
     fun paceAtFraction(vdot: Double, frac: Double): Double = 60000.0 / velocityForVo2(vdot * frac)
 }

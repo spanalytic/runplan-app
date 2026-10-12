@@ -45,6 +45,7 @@ import dev.runplan.app.ui.components.WorkoutShape
 import dev.runplan.app.ui.components.bars
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Fmt
+import dev.runplan.core.Vdot
 import dev.runplan.core.Plan
 import dev.runplan.core.Workout
 import java.time.LocalDate
@@ -91,6 +92,15 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, startRun: (String
                     else "${p.profile.goal.label} in $weeksLeft ${if (weeksLeft == 1L) "week" else "weeks"}",
                     style = MaterialTheme.typography.titleSmall, color = Palette.Slate,
                 )
+                if (weeksLeft >= 2) {
+                    val goalM = p.profile.goal.distance.metres
+                    val (lo, hi) = Vdot.projected(p.paces.vdot, weeksLeft.toInt())
+                    Text(
+                        "Race-day target: ${Fmt.duration(Vdot.roundTime(Vdot.predictTime(hi, goalM), goalM))} to " +
+                            Fmt.duration(Vdot.roundTime(Vdot.predictTime(lo, goalM), goalM)),
+                        style = MaterialTheme.typography.titleSmall, color = Palette.Slate,
+                    )
+                }
                 Text(LocalDate.ofEpochDay(today).format(longDate), style = MaterialTheme.typography.headlineMedium)
             }
         }

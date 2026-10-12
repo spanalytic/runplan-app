@@ -28,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.FileDownload
 import androidx.compose.material3.OutlinedButton
@@ -89,7 +90,12 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
         Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Spacer(Modifier.weight(1f))
-            if (r != null) RunMenu(r, track, onDelete = { confirmDelete = true })
+            if (r != null) RunMenu(r, track, onDelete = { confirmDelete = true }, onStrava = {
+                stravaMessage = runCatching { Strava.sendViaWeb(ctx, r, track) }.fold(
+                    { name -> "Saved $name to Downloads. On the Strava page, choose it as the file to upload. If you see Strava's mobile page instead, switch your browser to Desktop site." },
+                    { e -> e.message ?: "Couldn't save the file." },
+                )
+            })
         }
         if (r == null) {
             Text("This run was deleted.", Modifier.padding(24.dp))
@@ -301,13 +307,19 @@ private fun ZoneLegend(track: List<TrackPoint>, paces: Paces?) {
 
 /** Overflow menu: Export (then a format) and Delete. */
 @Composable
-private fun RunMenu(r: RunRecord, track: List<TrackPoint>, onDelete: () -> Unit) {
+private fun RunMenu(r: RunRecord, track: List<TrackPoint>, onDelete: () -> Unit, onStrava: () -> Unit) {
     val ctx = LocalContext.current
     var menu by remember { mutableStateOf(false) }
     var exports by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More options") }
         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(
+                text = { Text(if (r.sentToStrava) "Upload to Strava again" else "Upload to Strava") },
+                leadingIcon = { Icon(Icons.Outlined.CloudUpload, contentDescription = null) },
+                enabled = track.size >= 2,
+                onClick = { menu = false; onStrava() },
+            )
             DropdownMenuItem(
                 text = { Text("Export") },
                 leadingIcon = { Icon(Icons.Outlined.FileDownload, contentDescription = null) },

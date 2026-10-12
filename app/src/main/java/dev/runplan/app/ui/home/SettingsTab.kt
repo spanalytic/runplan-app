@@ -64,9 +64,25 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
         val profile = state.profile
         if (p != null && profile != null) {
             Section("Your paces")
+            val goalM = profile.goal.distance.metres
+            val goalName = profile.goal.label.let { if (it.endsWith("K")) it else it.lowercase() }
+            val today = remember { java.time.LocalDate.now().toEpochDay() }
+            val weeksLeft = ((profile.raceEpochDay - today) / 7).toInt()
+            val (lo, hi) = Vdot.projected(p.vdot, weeksLeft)
             Text(
-                "Based on your ${profile.recentDistance.label} in ${Fmt.duration(profile.recentSec)}. " +
-                    "Predicted ${profile.goal.label}: ${Fmt.duration(Vdot.predictTime(p.vdot, profile.goal.distance.metres))}.",
+                buildString {
+                    append("Set from your ${profile.recentDistance.label} in ${Fmt.duration(profile.recentSec)}, so they match your fitness today.")
+                    if (profile.recentDistance.metres != goalM) {
+                        append(" That's about ${Fmt.duration(Vdot.roundTime(Vdot.predictTime(p.vdot, goalM), goalM))} for a $goalName now.")
+                    }
+                    if (weeksLeft >= 2) {
+                        append(" Follow the plan and a realistic race-day target is ")
+                        append(Fmt.duration(Vdot.roundTime(Vdot.predictTime(hi, goalM), goalM)))
+                        append(" to ")
+                        append(Fmt.duration(Vdot.roundTime(Vdot.predictTime(lo, goalM), goalM)))
+                        append(". Your paces move up when you log a faster race or time trial.")
+                    }
+                },
                 style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
             )
             Spacer(Modifier.height(8.dp))
