@@ -200,7 +200,7 @@ class RunService : LifecycleService() {
                 is Cue.Split -> s.splits
                 else -> true
             }
-            if (speak) speaker.speak(c.speech(), interrupt = c is Cue.StepStart || c is Cue.Finished)
+            if (speak) speaker.speak(c.speech())
             if (c is Cue.StepStart) {
                 stepStarts += SystemClock.elapsedRealtime()
                 buzz(longArrayOf(0, 120, 80, 120))

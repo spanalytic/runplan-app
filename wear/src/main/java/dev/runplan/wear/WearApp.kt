@@ -136,6 +136,7 @@ private fun Active(s: RunState, ink: Color, send: (String) -> Unit) {
             if (s.fast.isFinite()) Fmt.band(s.fast, s.slow) else "${Fmt.km(s.distanceM)} km",
             style = style(16), color = ink,
         )
+        if (s.lapPace.isFinite()) Text("lap ${Fmt.pace(s.lapPace)}", style = style(14), color = sub)
         if (s.stepRemaining.isFinite()) {
             Text(
                 if (s.remainingIsDistance) "${s.stepRemaining.coerceAtLeast(0.0).toInt()} m" else Fmt.duration(s.stepRemaining),

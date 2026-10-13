@@ -1,5 +1,6 @@
 package dev.runplan.core
 
+import kotlin.math.abs
 import kotlin.math.asin
 import kotlin.math.cos
 import kotlin.math.exp
@@ -84,21 +85,24 @@ private class Axis {
 }
 
 /**
- * Distance and current pace from location fixes, robust to the two things that make phone GPS pace
- * jumpy: everyday position noise, and multipath "drift" where the reported position wanders off
- * by tens of metres while you are moving steadily.
+ * Distance and current pace from location fixes.
  *
- * - Positions go through a constant-velocity Kalman filter with outlier gating, so single bad fixes
- *   are ignored and noise is smoothed.
- * - Current pace comes from the receiver's Doppler speed (unaffected by position error) when the fix
- *   carries one, otherwise from the filter's velocity, smoothed with a [tauSec] time constant.
- * - Distance integrates the Doppler speed (held within 3% of the filtered track) when available, so
- *   position drift can't add distance you didn't run; otherwise it follows the filtered track.
+ * Tuned on a real run recorded alongside a Galaxy Watch. On that phone the receiver's Doppler
+ * speed read about 6% low, and position noise under trees made per-second pace swing by minutes.
+ *
+ * - Positions go through a constant-velocity Kalman filter with outlier gating.
+ * - Distance is measured along the filtered track in 5-second chords (matched the watch to within 1%),
+ *   each chord capped at 15% over the calibrated Doppler distance so multipath drift can't add much.
+ *   Standing still adds nothing.
+ * - Current pace blends two estimates: Doppler speed, calibrated against the chord distance over the
+ *   last two minutes and with one-off outliers rejected (a reading more than 35% away from the last
+ *   five is ignored until it persists), and the track distance covered in the last 15 seconds.
  *
  * Times are monotonic milliseconds (e.g. elapsedRealtime). [pause] stops counting; the first fix
  * after [resume] starts a fresh segment.
  */
-class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double = 5.0) {
+class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double = 8.0) {
+    /** Cumulative distance; never decreases. */
     var distanceM = 0.0; private set
     var lastFixMs = -1L; private set
     private var lastGoodMs = -1L
@@ -113,9 +117,30 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
     private var lon0 = 0.0
     private var mPerDegLon = 0.0
     private var rejects = 0
-    private var speed = Double.NaN          // smoothed ground speed, m/s
 
-    fun pause() { paused = true; started = false; speed = Double.NaN }
+    // distance in chords
+    private var committed = 0.0
+    private var anchorX = 0.0
+    private var anchorY = 0.0
+    private var anchorMs = 0L
+    private var dopSince = 0.0                         // raw Doppler metres since the anchor
+    private var dopKnown = true                        // every fix since the anchor had Doppler
+
+    // Doppler calibration: (time, chord metres, raw Doppler metres)
+    private val calib = ArrayDeque<Triple<Long, Double, Double>>()
+    var calibration = 1.0; private set
+
+    // pace estimates
+    private val dopHist = ArrayDeque<Double>()
+    private var dopEma = Double.NaN
+    private val distHist = ArrayDeque<Pair<Long, Double>>()
+    private var speed = Double.NaN                     // blended, m/s
+
+    fun pause() {
+        paused = true; started = false
+        speed = Double.NaN; dopEma = Double.NaN
+        dopHist.clear(); distHist.clear()
+    }
     fun resume() { paused = false }
 
     private fun east(lon: Double) = (lon - lon0) * mPerDegLon
@@ -127,8 +152,15 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
 
     private fun doppler(p: TrackPoint): Double? {
         if (!p.speed.isFinite() || p.speed < 0) return null
-        if (p.speedAcc.isFinite() && p.speedAcc > 1.5f) return null
+        if (p.speedAcc.isFinite() && p.speedAcc > 1.0f) return null
         return p.speed.toDouble()
+    }
+
+    private fun median(xs: Collection<Double>): Double = xs.sorted().let { s -> if (s.isEmpty()) Double.NaN else s[s.size / 2] }
+
+    private fun setAnchor(ms: Long) {
+        anchorX = x.p; anchorY = y.p; anchorMs = ms
+        dopSince = 0.0; dopKnown = true
     }
 
     /** @return true if the fix was used. */
@@ -146,18 +178,19 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
             val r = max(p.acc.toDouble(), 3.0).pow(2)
             x.reset(east(p.lon), 0.0, r, 4.0)
             y.reset(north(p.lat), 0.0, r, 4.0)
-            speed = dop ?: Double.NaN
             lastMs = p.tMs
             started = true
             rejects = 0
+            setAnchor(p.tMs)
+            committed = distanceM
+            if (dop != null) { dopHist.addLast(dop); dopEma = dop * calibration; speed = dopEma }
+            distHist.addLast(p.tMs to distanceM)
             record(p)
             return true
         }
 
         val dt = (p.tMs - lastMs) / 1000.0
         if (dt <= 0) return false
-        val px = x.p
-        val py = y.p
         x.predict(dt, Q)
         y.predict(dt, Q)
 
@@ -168,9 +201,9 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
         val accepted = d2 <= GATE || rejects >= MAX_REJECTS
         if (accepted) {
             if (rejects >= MAX_REJECTS) {
-                // the "outliers" have persisted: we were wrong, re-acquire at the measurement
                 x.reset(zx, x.v, r, 4.0)
                 y.reset(zy, y.v, r, 4.0)
+                setAnchor(p.tMs)            // don't count the jump to the re-acquired position
             } else {
                 x.update(zx, r)
                 y.update(zy, r)
@@ -180,24 +213,62 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
             rejects++
         }
         lastMs = p.tMs
-
-        // distance: filtered track, held within a band around the Doppler distance
-        val posInc = hypot(x.p - px, y.p - py)
         val filtSpeed = hypot(x.v, y.v)
-        val inc = if (dop != null) {
-            // Doppler speed is unbiased and immune to position wander; the track only nudges it
-            val dopInc = dop * dt
-            if (dop < STATIONARY) 0.0 else posInc.coerceIn(0.97 * dopInc, 1.03 * dopInc)
-        } else {
-            if (filtSpeed < STATIONARY) 0.0 else min(posInc, (filtSpeed + 1.0) * dt)
-        }
-        distanceM += inc
 
-        // pace: smooth speed (not pace) so slow paces don't swing wildly
-        val measured = dop ?: filtSpeed
-        // position-derived speed is much noisier than Doppler, so it gets heavier smoothing
-        val alpha = 1 - exp(-dt / (if (dop != null) tauSec else tauSec * 2.5))
-        speed = if (speed.isNaN()) measured else speed + alpha * (measured - speed)
+        // robust Doppler: a reading far from the recent median is replaced by the median
+        var dopUse: Double? = null
+        if (dop != null) {
+            val med = median(dopHist)
+            dopUse = if (med.isNaN() || med < 0.5 || abs(dop - med) <= OUTLIER * med) dop else med
+            dopHist.addLast(dop)
+            while (dopHist.size > 5) dopHist.removeFirst()
+            dopSince += dop * dt
+        } else {
+            dopKnown = false
+            dopSince += filtSpeed * dt
+        }
+
+        // distance: chords along the filtered track
+        val chord = hypot(x.p - anchorX, y.p - anchorY)
+        val chordSec = (p.tMs - anchorMs) / 1000.0
+        val cap = if (dopKnown) CAP_FACTOR * calibration * dopSince + CAP_SLACK else (filtSpeed + 1.5) * chordSec
+        val stationary = chordSec > 0 && dopSince / chordSec < STATIONARY
+        val inc = if (stationary) 0.0 else min(chord, cap)
+        if (chordSec >= CHORD_SEC) {
+            committed += inc
+            // chords that hit the cap are suspect (drift), so they don't feed the calibration
+            if (dopKnown && !stationary && chord < cap) calib.addLast(Triple(p.tMs, inc, dopSince))
+            setAnchor(p.tMs)
+            distanceM = max(distanceM, committed)
+        } else {
+            distanceM = max(distanceM, committed + inc)
+        }
+
+        // calibration of Doppler against the track, over the last two minutes
+        while (calib.isNotEmpty() && p.tMs - calib.first().first > CALIB_MS) calib.removeFirst()
+        val cd = calib.sumOf { it.third }
+        if (cd > 150) calibration = (calib.sumOf { it.second } / cd).coerceIn(0.85, 1.25)
+
+        // pace: blend calibrated Doppler with track distance over the last 15 s
+        val alpha = 1 - exp(-dt / tauSec)
+        if (dopUse != null) {
+            val v = dopUse * calibration
+            dopEma = if (dopEma.isNaN()) v else dopEma + alpha * (v - dopEma)
+        } else {
+            dopEma = if (dopEma.isNaN()) filtSpeed else dopEma + alpha / 2.5 * (filtSpeed - dopEma)
+        }
+        distHist.addLast(p.tMs to distanceM)
+        while (distHist.size > 2 && p.tMs - distHist.first().first > WINDOW_MS) distHist.removeFirst()
+        val (t0, d0) = distHist.first()
+        val span = (p.tMs - t0) / 1000.0
+        val vTrack = if (span >= 8) (distanceM - d0) / span else Double.NaN
+        speed = when {
+            // the track can't pull pace more than 20% away from calibrated Doppler (guards against drift)
+            vTrack.isFinite() && dopEma.isFinite() && dopEma > 0.5 -> (vTrack.coerceIn(0.8 * dopEma, 1.2 * dopEma) + dopEma) / 2
+            vTrack.isFinite() && dopEma.isFinite() -> (vTrack + dopEma) / 2
+            dopEma.isFinite() -> dopEma
+            else -> vTrack
+        }
 
         record(p)
         return accepted
@@ -218,11 +289,17 @@ class Odometer(private val maxAccuracy: Float = 25f, private val tauSec: Double 
 
     companion object {
         private const val M_PER_DEG_LAT = 111_195.0
-        private const val Q = 0.5            // acceleration noise variance, m²/s⁴ (a runner changes speed gently)
+        private const val Q = 0.5            // acceleration noise variance, m²/s⁴
         private const val GATE = 16.0        // Mahalanobis² gate (~4 sigma, 2 dof)
         private const val MAX_REJECTS = 5    // after this many consecutive rejects, trust the GPS again
         private const val STATIONARY = 0.3   // m/s; below this, no distance is added
         private const val MIN_SPEED = 0.5    // m/s; below this (33:20/km) pace shows as stopped
+        private const val CHORD_SEC = 5.0
+        private const val CAP_FACTOR = 1.15  // a chord may exceed the calibrated Doppler distance by 15% ...
+        private const val CAP_SLACK = 1.0    // ... plus 1 m
+        private const val OUTLIER = 0.35
+        private const val CALIB_MS = 120_000L
+        private const val WINDOW_MS = 15_000L
     }
 }
 

@@ -58,33 +58,78 @@ enum class PaceStatus { NONE, IN_BAND, SLOW, FAST }
 
 /** Things the phone should say or the watch should buzz for. */
 sealed interface Cue {
-    data class StepStart(val step: RunStep, val index: Int, val count: Int, val next: RunStep?) : Cue
+    /** A new step begins. [prev] is the step just finished (null at the start of the run). */
+    data class StepStart(val step: RunStep, val index: Int, val count: Int, val next: RunStep?, val prev: StepResult?) : Cue
+    /** "10 seconds" / "200 metres to go", announcing what comes next. */
+    data class Countdown(val left: String, val next: RunStep?) : Cue
     data class Remaining(val text: String) : Cue
+    /** Halfway through a step of 2 minutes or more, with the pace so far. */
+    data class Halfway(val pace: Double, val step: RunStep) : Cue
     data class PaceAlert(val tooSlow: Boolean, val pace: Double, val step: RunStep) : Cue
     data class Split(val km: Int, val secPerKm: Double) : Cue
-    data class Finished(val distanceM: Double, val sec: Double) : Cue
+    data class Finished(val distanceM: Double, val sec: Double, val prev: StepResult?) : Cue
 
-    /** Text for text-to-speech. */
+    /** Text for text-to-speech. Targets are spoken as the middle of the band. */
     fun speech(): String = when (this) {
         is StepStart -> buildString {
-            append(step.label).append(". ")
-            val amt = when {
-                step.metres != null -> spokenDistance(step.metres)
-                step.secs != null -> spokenDuration(step.secs)
-                else -> null
-            }
-            if (amt != null) append(amt)
-            if (step.hasTarget) append(" at ").append(spokenPace(step.fast)).append(" to ").append(spokenPace(step.slow))
-            else if (step.kind == StepKind.RECOVERY) append(" easy jog")
-            append('.')
+            append(opener(step)).append(' ')
+            append(step.label).append(": ").append(spokenStep(step)).append('.')
+            prev?.let { append(' ').append(spokenResult(it)) }
         }
+        is Countdown -> left + if (next != null) " Next: ${next.label}, ${spokenStep(next)}." else ""
         is Remaining -> text
-        is PaceAlert -> (if (tooSlow) "Speed up. " else "Ease off. ") + "Pace ${spokenPace(pace)}."
-        is Split -> "Kilometre $km. ${spokenPace(secPerKm)}."
-        is Finished -> "Workout complete. ${spokenDistance(distanceM)} in ${spokenDuration(sec)}."
+        is Halfway -> "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
+            (verdict(pace, step.fast, step.slow)?.let { ", $it" } ?: "") + "."
+        is PaceAlert -> (if (tooSlow) "Speed up. " else "Slow down a little. ") +
+            "Pace ${spokenPace(pace)}, target ${spokenPace((step.fast + step.slow) / 2)}."
+        is Split -> "Kilometre $km. ${spokenPace(secPerKm)} per kilometre."
+        is Finished -> (prev?.let { spokenResult(it) + " " } ?: "") +
+            "Workout complete. ${spokenDistance(distanceM)} in ${spokenDuration(sec)}."
     }
 
     companion object {
+        private fun opener(st: RunStep): String = when (st.kind) {
+            StepKind.WARMUP -> "Let's go."
+            StepKind.COOLDOWN -> "Last one."
+            StepKind.RECOVERY -> "Recover."
+            StepKind.INTERVAL -> if (st.zone == null || st.zone == Zone.E) "Keep going." else "Go!"
+        }
+
+        /** "1 minute at 5 26 per kilometre", "2 minutes easy jog", "12 kilometres at 7 15 per kilometre". */
+        fun spokenStep(st: RunStep): String {
+            val amt = when {
+                st.metres != null -> spokenDistance(st.metres)
+                st.secs != null -> spokenDuration(st.secs)
+                else -> "Run as you like"
+            }
+            return when {
+                st.hasTarget -> "$amt at ${spokenPace((st.fast + st.slow) / 2)} per kilometre"
+                st.kind == StepKind.RECOVERY -> "$amt easy jog"
+                else -> amt
+            }
+        }
+
+        /** "Last lap: 1 minute, 208 metres, 4 49 per kilometre, 37 seconds faster than target." */
+        fun spokenResult(r: StepResult): String = buildString {
+            append("Last lap: ").append(spokenDuration(r.sec))
+            if (r.metres >= 10) {
+                append(", ").append(spokenDistance(r.metres))
+                if (r.pace.isFinite()) append(", ").append(spokenPace(r.pace)).append(" per kilometre")
+                verdict(r.pace, r.fast, r.slow)?.let { append(", ").append(it) }
+            }
+            append('.')
+        }
+
+        /** "on target", "12 seconds faster than target", or null when there is no target. */
+        fun verdict(pace: Double, fast: Double, slow: Double): String? {
+            if (!fast.isFinite() || !pace.isFinite()) return null
+            return when {
+                pace < fast - 3 -> "${Math.round(fast - pace)} seconds faster than target"
+                pace > slow + 3 -> "${Math.round(pace - slow)} seconds slower than target"
+                else -> "on target"
+            }
+        }
+
         fun spokenPace(s: Double): String {
             if (!s.isFinite()) return ""
             val r = Math.round(s)
@@ -133,11 +178,12 @@ data class RunState(
     val finished: Boolean,
     val nextLabel: String,
     val gpsOk: Boolean,
+    val lapPace: Double = Double.NaN,  // average pace so far in this step
 ) {
     /** Compact wire format for the watch (no JSON dependency in core). */
     fun encode(): ByteArray = listOf(
         title, stepLabel, stepIndex, stepCount, zoneCode, fast, slow, pace, avgPace, status.name,
-        stepRemaining, remainingIsDistance, stepProgress, elapsedSec, distanceM, paused, finished, nextLabel, gpsOk,
+        stepRemaining, remainingIsDistance, stepProgress, elapsedSec, distanceM, paused, finished, nextLabel, gpsOk, lapPace,
     ).joinToString(SEP) { it.toString().replace(SEP, " ") }.toByteArray(Charsets.UTF_8)
 
     companion object {
@@ -149,6 +195,7 @@ data class RunState(
                 f[0], f[1], f[2].toInt(), f[3].toInt(), f[4], f[5].toDouble(), f[6].toDouble(),
                 f[7].toDouble(), f[8].toDouble(), PaceStatus.valueOf(f[9]), f[10].toDouble(), f[11].toBoolean(),
                 f[12].toDouble(), f[13].toDouble(), f[14].toDouble(), f[15].toBoolean(), f[16].toBoolean(), f[17], f[18].toBoolean(),
+                f.getOrNull(19)?.toDoubleOrNull() ?: Double.NaN,   // older phones don't send it
             )
         }.getOrNull()
 
@@ -186,6 +233,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     private var outSinceMs = -1L
     private var lastAlertMs = -1_000_000L
     private val said = HashSet<String>()
+    private val recent = ArrayDeque<Pair<Long, Double>>()   // (elapsed ms, distance) for the last 30 s
     private var nextSplitKm = 1
     private var lastSplitMs = 0L
     val results = ArrayList<StepResult>()
@@ -193,7 +241,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
 
     val current: RunStep get() = steps[index]
 
-    fun start(): List<Cue> = listOf(Cue.StepStart(current, 0, steps.size, steps.getOrNull(1)))
+    fun start(): List<Cue> = listOf(Cue.StepStart(current, 0, steps.size, steps.getOrNull(1), null))
 
     private fun stepSec() = (elapsedMs - stepStartMs) / 1000.0
     private fun stepM() = distanceM - stepStartM
@@ -205,12 +253,28 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         else -> Double.NaN
     }
 
+    /** Average pace since the step started (NaN for the first 10 s / 20 m). */
+    fun lapPace(): Double = if (stepSec() >= 10 && stepM() >= 20) stepSec() / (stepM() / 1000) else Double.NaN
+
+    /**
+     * Pace used for on/off-target decisions: distance over the last 20 s (or since the step
+     * started), which is far steadier than the second-by-second display.
+     */
+    private fun steadyPace(): Double {
+        val since = maxOf(stepStartMs, elapsedMs - 20_000)
+        val start = recent.firstOrNull { it.first >= since } ?: return pace
+        val sec = (elapsedMs - start.first) / 1000.0
+        val m = distanceM - start.second
+        return if (sec >= 12 && m >= 15) sec / (m / 1000) else pace
+    }
+
     fun status(): PaceStatus {
         val st = current
-        if (!st.hasTarget || !pace.isFinite()) return PaceStatus.NONE
+        val p = steadyPace()
+        if (!st.hasTarget || !p.isFinite()) return PaceStatus.NONE
         return when {
-            pace > st.slow + 3 -> PaceStatus.SLOW
-            pace < st.fast - 3 -> PaceStatus.FAST
+            p > st.slow + 3 -> PaceStatus.SLOW
+            p < st.fast - 3 -> PaceStatus.FAST
             else -> PaceStatus.IN_BAND
         }
     }
@@ -225,6 +289,8 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         this.elapsedMs = elapsedMs
         this.distanceM = distanceM
         this.pace = pace
+        recent.addLast(elapsedMs to distanceM)
+        while (recent.size > 2 && elapsedMs - recent.first().first > 30_000) recent.removeFirst()
         val cues = ArrayList<Cue>()
 
         // km splits (only on longer continuous steps, so reps aren't cluttered)
@@ -244,11 +310,21 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             return cues
         }
 
-        // countdown cues
+        // halfway, countdowns
         val st = current
-        if (st.secs != null && st.secs >= 180 && rem <= 60 && said.add("60")) cues += Cue.Remaining("One minute left.")
-        if (st.secs != null && st.secs >= 60 && rem <= 10 && said.add("10")) cues += Cue.Remaining("10 seconds.")
-        if (st.metres != null && st.metres >= 1000 && rem <= 200 && said.add("200")) cues += Cue.Remaining("200 metres to go.")
+        val next = steps.getOrNull(index + 1)
+        val half = when {
+            st.secs != null && st.secs >= 120 -> stepSec() >= st.secs / 2
+            st.metres != null && st.metres >= 1000 -> stepM() >= st.metres / 2
+            else -> false
+        }
+        if (half && said.add("half")) {
+            val sofar = if (stepM() >= 20) stepSec() / (stepM() / 1000) else Double.NaN
+            if (sofar.isFinite()) cues += Cue.Halfway(sofar, st)
+        }
+        if (st.secs != null && st.secs >= 180 && rem <= 60 && rem > 15 && said.add("60")) cues += Cue.Remaining("One minute left.")
+        if (st.secs != null && st.secs >= 30 && rem <= 10 && said.add("10")) cues += Cue.Countdown("10 seconds left.", next)
+        if (st.metres != null && st.metres >= 1000 && rem <= 200 && said.add("200")) cues += Cue.Countdown("200 metres to go.", next)
 
         // pace alerts: settle 30 s into a step, 8 s out of band, then at most every 30 s
         val s = status()
@@ -257,7 +333,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         if (alertable && (s == PaceStatus.SLOW || s == PaceStatus.FAST)) {
             if (outSinceMs < 0) outSinceMs = elapsedMs
             if (elapsedMs - outSinceMs >= 8_000 && elapsedMs - lastAlertMs >= 30_000) {
-                cues += Cue.PaceAlert(s == PaceStatus.SLOW, pace, st)
+                cues += Cue.PaceAlert(s == PaceStatus.SLOW, steadyPace(), st)
                 lastAlertMs = elapsedMs
             }
         } else {
@@ -269,7 +345,8 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     /** Close the current step and move on (also used for "skip"). */
     fun advance(): List<Cue> {
         if (finished) return emptyList()
-        results += StepResult(current.label, current.zone?.code ?: "", current.fast, current.slow, stepSec(), stepM())
+        val done = StepResult(current.label, current.zone?.code ?: "", current.fast, current.slow, stepSec(), stepM())
+        results += done
         stepStartMs = elapsedMs
         stepStartM = distanceM
         said.clear()
@@ -277,10 +354,10 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         lastAlertMs = -1_000_000L
         return if (index + 1 >= steps.size) {
             finished = true
-            listOf(Cue.Finished(distanceM, elapsedMs / 1000.0))
+            listOf(Cue.Finished(distanceM, elapsedMs / 1000.0, done))
         } else {
             index++
-            listOf(Cue.StepStart(current, index, steps.size, steps.getOrNull(index + 1)))
+            listOf(Cue.StepStart(current, index, steps.size, steps.getOrNull(index + 1), done))
         }
     }
 
@@ -289,7 +366,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         if (finished) return emptyList()
         results += StepResult(current.label, current.zone?.code ?: "", current.fast, current.slow, stepSec(), stepM())
         finished = true
-        return listOf(Cue.Finished(distanceM, elapsedMs / 1000.0))
+        return listOf(Cue.Finished(distanceM, elapsedMs / 1000.0, null))
     }
 
     fun state(paused: Boolean, gpsOk: Boolean): RunState {
@@ -317,6 +394,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             finished = finished,
             nextLabel = steps.getOrNull(index + 1)?.let { "${it.label}, ${it.describe()}" } ?: "",
             gpsOk = gpsOk,
+            lapPace = if (finished) Double.NaN else lapPace(),
         )
     }
 }

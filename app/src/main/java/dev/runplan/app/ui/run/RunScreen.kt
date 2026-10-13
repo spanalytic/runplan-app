@@ -196,7 +196,9 @@ private fun ActiveRun(
             PaceStatus.IN_BAND -> "On pace"
             PaceStatus.NONE -> ""
         }
-        if (verdict.isNotEmpty() && !paused) Text(verdict, style = MaterialTheme.typography.titleMedium, color = sub)
+        val lap = if (s.lapPace.isFinite()) "Lap average ${Fmt.pace(s.lapPace)}" else ""
+        val line = listOf(lap, if (paused) "" else verdict).filter { it.isNotEmpty() }.joinToString(". ")
+        if (line.isNotEmpty()) Text(line, style = MaterialTheme.typography.titleMedium, color = sub)
 
         Spacer(Modifier.height(28.dp))
         // time / distance left in this step
