@@ -213,7 +213,10 @@ data class StepResult(
     val metres: Double,
 ) {
     val pace: Double get() = if (metres > 10) sec / (metres / 1000) else Double.NaN
+    /** Inside the target band (3 s/km tolerance). */
     val hit: Boolean? get() = if (fast.isFinite() && pace.isFinite()) pace in (fast - 3)..(slow + 3) else null
+    /** At target pace or faster. */
+    val onOrAhead: Boolean? get() = if (fast.isFinite() && pace.isFinite()) pace <= slow + 3 else null
 }
 
 /**

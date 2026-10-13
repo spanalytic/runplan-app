@@ -121,10 +121,10 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                 Big(Fmt.pace(r.pace), "avg /km")
             }
 
-            val targeted = r.steps.mapNotNull { it.hit }
+            val targeted = r.steps.mapNotNull { it.onOrAhead }
             if (targeted.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
-                Text("${targeted.count { it }} of ${targeted.size} paced steps on target", style = MaterialTheme.typography.titleMedium)
+                Text("${targeted.count { it }} of ${targeted.size} paced steps on or ahead of target", style = MaterialTheme.typography.titleMedium)
             }
 
             val paceData = remember(track) { Analytics.paceSeries(track) }
@@ -187,7 +187,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                     }
                     Text(Fmt.pace(s.pace), style = MaterialTheme.typography.headlineSmall)
                     Spacer(Modifier.width(10.dp))
-                    val hit = s.hit
+                    val hit = s.onOrAhead
                     Box(
                         Modifier.size(10.dp).clip(CircleShape).background(
                             when (hit) { true -> Palette.Good; false -> Palette.Amber; null -> MaterialTheme.colorScheme.background }
@@ -312,6 +312,11 @@ private fun RunMenu(r: RunRecord, track: List<TrackPoint>, onDelete: () -> Unit,
         }
         DropdownMenu(expanded = exports, onDismissRequest = { exports = false }) {
             val hasTrack = track.size >= 2
+            ExportItem("Export all", "All four files below in one share", true) {
+                exports = false
+                Exports.all(ctx, r, track, RunPlanApp.store.trackFile(r.id))
+            }
+            HorizontalDivider(color = Palette.Line)
             ExportItem("GPX", "Route for any map or fitness app", hasTrack) { exports = false; Exports.gpx(ctx, r, track) }
             ExportItem("TCX", "Route with each step as a lap", hasTrack) { exports = false; Exports.tcx(ctx, r, track) }
             ExportItem("Steps CSV", "Pace and target for every step", true) { exports = false; Exports.stepsCsv(ctx, r) }

@@ -57,7 +57,7 @@ private val longDate = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.UK)
 private val dow = DateTimeFormatter.ofPattern("EEE", Locale.UK)
 
 @Composable
-fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, startRun: (String?) -> Unit, resumeRun: () -> Unit) {
+fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String) -> Unit, startRun: (String?) -> Unit, resumeRun: () -> Unit) {
     val session by RunSession.view.collectAsStateWithLifecycle()
     val runActive = session.phase in setOf(RunPhase.READY, RunPhase.RUNNING, RunPhase.PAUSED)
     val plan by RunPlanApp.store.plan.collectAsStateWithLifecycle()
@@ -71,6 +71,11 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, startRun: (String
         return
     }
     val byWeek = remember(p) { p.byWeek() }
+    // a completed workout opens its recorded run; otherwise the workout details
+    val runFor = remember(state.runs) {
+        state.runs.filter { it.workoutId != null }.groupBy { it.workoutId!! }.mapValues { (_, rs) -> rs.maxBy { it.startMs }.id }
+    }
+    val open: (String) -> Unit = { id -> runFor[id]?.let(openRun) ?: openSession(id) }
     val currentWeek = remember(p, today) { p.workouts.firstOrNull { it.epochDay >= today }?.week ?: p.weeks }
     var showEarlier by remember { mutableStateOf(false) }
 
@@ -105,12 +110,12 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, startRun: (String
             }
         }
         item {
-            TodayBlock(p, today, state.done, openSession, startRun)
+            TodayBlock(p, today, state.done, open, startRun)
         }
         for (week in currentWeek..p.weeks) {
             val ws = byWeek[week] ?: continue
             item(key = "h$week") { WeekHeader(p, week, ws) }
-            items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, w.epochDay == today) { openSession(w.id) } }
+            items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, w.epochDay == today) { open(w.id) } }
         }
         if (currentWeek > 1) {
             item {
@@ -121,7 +126,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, startRun: (String
             if (showEarlier) for (week in 1 until currentWeek) {
                 val ws = byWeek[week] ?: continue
                 item(key = "h$week") { WeekHeader(p, week, ws) }
-                items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, false) { openSession(w.id) } }
+                items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, false) { open(w.id) } }
             }
         }
     }
@@ -166,7 +171,7 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, openSession: (St
                 Icon(Icons.Filled.Check, contentDescription = null, tint = Palette.Good)
                 Spacer(Modifier.width(6.dp))
                 Text("Done", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = { openSession(w.id) }) { Text("Details") }
+                TextButton(onClick = { openSession(w.id) }) { Text("View run") }
             } else {
                 Button(onClick = { startRun(w.id) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).height(52.dp)) {
                     Text("Start run")

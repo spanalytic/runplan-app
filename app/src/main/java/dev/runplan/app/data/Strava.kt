@@ -81,7 +81,7 @@ object Strava {
         if (w != null) append(Fmt.summary(w)).append('\n')
         val paced = r.steps.filter { it.fast.isFinite() && it.label.startsWith("Rep") }
         if (paced.isNotEmpty()) {
-            append("Reps on target: ${paced.count { it.hit == true }} of ${paced.size}\n")
+            append("Reps on or ahead of target: ${paced.count { it.onOrAhead == true }} of ${paced.size}\n")
             paced.forEach { append("${it.label}: ${Fmt.pace(it.pace)}/km (target ${Fmt.band(it.fast, it.slow)})\n") }
         }
         append("Recorded with RunPlan")

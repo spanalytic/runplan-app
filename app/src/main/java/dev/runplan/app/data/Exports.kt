@@ -86,43 +86,67 @@ object Exports {
         share(ctx, f, "text/csv", "Export best efforts")
     }
 
-    /** One row per step of one run. */
-    fun stepsCsv(ctx: Context, r: RunRecord) {
-        val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}_steps.csv")
+    private fun stem(r: RunRecord) = "runplan_${LocalDate.ofEpochDay(r.epochDay)}"
+
+    private fun stepsFile(ctx: Context, r: RunRecord): File {
+        val f = File(dir(ctx), "${stem(r)}_steps.csv")
         f.bufferedWriter().use { w ->
-            w.write("step,label,zone,target_fast,target_slow,duration_sec,distance_m,pace_sec_per_km,on_target\n")
+            w.write("step,label,zone,target_fast,target_slow,duration_sec,distance_m,pace_sec_per_km,on_target,on_or_ahead\n")
             r.steps.forEachIndexed { i, s ->
                 w.write(listOf(
                     (i + 1).toString(), csvCell(s.label), s.zoneCode, n(s.fast, 0), n(s.slow, 0),
-                    n(s.sec, 0), n(s.metres, 0), n(s.pace, 0), s.hit?.toString() ?: "",
+                    n(s.sec, 0), n(s.metres, 0), n(s.pace, 0), s.hit?.toString() ?: "", s.onOrAhead?.toString() ?: "",
                 ).joinToString(",") + "\n")
             }
         }
-        share(ctx, f, "text/csv", "Export steps")
+        return f
     }
+
+    private fun trackFile(ctx: Context, r: RunRecord, source: File): File? {
+        if (!source.exists()) return null
+        return source.copyTo(File(dir(ctx), "${stem(r)}_track.csv"), overwrite = true)
+    }
+
+    private fun gpxFile(ctx: Context, r: RunRecord, points: List<TrackPoint>): File? {
+        if (points.isEmpty()) return null
+        return File(dir(ctx), "${stem(r)}.gpx").apply {
+            writeText(ActivityFiles.gpx(r.title, r.startMs, if (r.startClockMs > 0) r.startClockMs else points.first().tMs, points))
+        }
+    }
+
+    private fun tcxFile(ctx: Context, r: RunRecord, points: List<TrackPoint>): File? {
+        if (points.isEmpty()) return null
+        val laps = r.steps.mapIndexedNotNull { i, s -> r.stepStartsMs.getOrNull(i)?.let { Lap(it, s.sec, s.metres, s.label.startsWith("Recovery")) } }
+        return File(dir(ctx), "${stem(r)}.tcx").apply {
+            writeText(ActivityFiles.tcx(r.startMs, if (r.startClockMs > 0) r.startClockMs else points.first().tMs, points, laps, Strava.description(r)))
+        }
+    }
+
+    /** One row per step of one run. */
+    fun stepsCsv(ctx: Context, r: RunRecord) = share(ctx, stepsFile(ctx, r), "text/csv", "Export steps")
 
     /** Raw GPS fixes (time, position, accuracy, Doppler speed) as CSV. */
     fun trackCsv(ctx: Context, r: RunRecord, source: File) {
-        if (!source.exists()) return
-        val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}_track.csv")
-        source.copyTo(f, overwrite = true)
-        share(ctx, f, "text/csv", "Export GPS track")
+        trackFile(ctx, r, source)?.let { share(ctx, it, "text/csv", "Export GPS track") }
     }
 
     /** GPX track (filtered positions) for Strava, Garmin Connect etc. */
     fun gpx(ctx: Context, r: RunRecord, points: List<TrackPoint>) {
-        if (points.isEmpty()) return
-        val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}.gpx")
-        f.writeText(ActivityFiles.gpx(r.title, r.startMs, if (r.startClockMs > 0) r.startClockMs else points.first().tMs, points))
-        share(ctx, f, "application/gpx+xml", "Export GPX")
+        gpxFile(ctx, r, points)?.let { share(ctx, it, "application/gpx+xml", "Export GPX") }
     }
 
     /** TCX with one lap per workout step. */
     fun tcx(ctx: Context, r: RunRecord, points: List<TrackPoint>) {
-        if (points.isEmpty()) return
-        val laps = r.steps.mapIndexedNotNull { i, s -> r.stepStartsMs.getOrNull(i)?.let { Lap(it, s.sec, s.metres, s.label.startsWith("Recovery")) } }
-        val f = File(dir(ctx), "runplan_${LocalDate.ofEpochDay(r.epochDay)}.tcx")
-        f.writeText(ActivityFiles.tcx(r.startMs, if (r.startClockMs > 0) r.startClockMs else points.first().tMs, points, laps, Strava.description(r)))
-        share(ctx, f, "application/vnd.garmin.tcx+xml", "Export TCX")
+        tcxFile(ctx, r, points)?.let { share(ctx, it, "application/vnd.garmin.tcx+xml", "Export TCX") }
+    }
+
+    /** GPX, TCX, steps CSV and GPS CSV in one share. */
+    fun all(ctx: Context, r: RunRecord, points: List<TrackPoint>, source: File) {
+        val files = listOfNotNull(gpxFile(ctx, r, points), tcxFile(ctx, r, points), stepsFile(ctx, r), trackFile(ctx, r, source))
+        val uris = ArrayList(files.map { FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", it) })
+        val send = Intent(Intent.ACTION_SEND_MULTIPLE).setType("*/*")
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        ctx.startActivity(Intent.createChooser(send, "Export all").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
