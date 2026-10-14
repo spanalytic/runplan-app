@@ -6,6 +6,7 @@ import dev.runplan.core.Distance
 import dev.runplan.core.Effort
 import dev.runplan.core.Fmt
 import dev.runplan.core.Goal
+import dev.runplan.core.Kept
 import dev.runplan.core.Moves
 import dev.runplan.core.Plan
 import dev.runplan.core.PlanBuilder
@@ -13,7 +14,14 @@ import dev.runplan.core.Profile
 import dev.runplan.core.StepResult
 import dev.runplan.core.Terrain
 import dev.runplan.core.TrackPoint
+import dev.runplan.core.Phase
+import dev.runplan.core.Repeat
+import dev.runplan.core.SessionType
+import dev.runplan.core.Single
+import dev.runplan.core.Step
+import dev.runplan.core.StepKind
 import dev.runplan.core.Workout
+import dev.runplan.core.Zone
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,6 +64,8 @@ data class AppState(
     val analyticsVersion: Int = 0,
     /** Sessions moved to another day of their week: workout id -> day. */
     val moves: Map<String, Long> = emptyMap(),
+    /** Done sessions as they were when done (workout id -> workout), so editing the plan doesn't change them. */
+    val kept: Map<String, Workout> = emptyMap(),
 )
 
 /**
@@ -80,21 +90,53 @@ class Store(context: Context) {
     val state: StateFlow<AppState> = _state.asStateFlow()
 
     private var basePlan: Plan? = buildPlan(_state.value.profile)
-    private val _plan = MutableStateFlow(basePlan?.let { Moves.apply(it, _state.value.moves) })
+    private val _plan = MutableStateFlow(shownPlan(_state.value))
     val plan: StateFlow<Plan?> = _plan.asStateFlow()
 
-    init { recoverInterruptedRun() }
+    init {
+        recoverKept()
+        recoverInterruptedRun()
+    }
 
     private fun buildPlan(p: Profile?): Plan? = p?.let { runCatching { PlanBuilder.build(it) }.getOrNull() }
+
+    /** The plan as shown: built from the profile, done sessions kept as they were, then moves. */
+    private fun shownPlan(s: AppState): Plan? = basePlan?.let { Moves.apply(Kept.apply(it, s.kept.values), s.moves) }
 
     @Synchronized
     fun update(f: (AppState) -> AppState) {
         val old = _state.value
-        val new = f(old)
+        val new = keepDone(f(old))
         _state.value = new
         if (new.profile != old.profile) basePlan = buildPlan(new.profile)
-        if (new.profile != old.profile || new.moves != old.moves) _plan.value = basePlan?.let { Moves.apply(it, new.moves) }
+        if (new.profile != old.profile || new.moves != old.moves || new.kept != old.kept) _plan.value = shownPlan(new)
         save(new)
+    }
+
+    /**
+     * Takes a copy of each newly done session from the plan as shown before this change, and lets go
+     * of sessions no longer done, so only sessions not yet done are rebuilt when the plan is edited.
+     */
+    private fun keepDone(s: AppState): AppState {
+        val shown = _plan.value
+        val add = (s.done - s.kept.keys).mapNotNull { id -> shown?.find(id)?.let { id to it } }
+        val kept = (s.kept + add).filterKeys { it in s.done }
+        return if (kept == s.kept) s else s.copy(kept = kept)
+    }
+
+    /**
+     * Saves from before done sessions were kept: the plan may already have been rebuilt under them
+     * (for example after adding hills), so work out which plan they were done from.
+     */
+    private fun recoverKept() {
+        val st = _state.value
+        val profile = st.profile ?: return
+        val missing = st.done - st.kept.keys
+        if (missing.isEmpty()) return
+        val runs = st.runs.filter { it.workoutId != null }.groupBy { it.workoutId!! }
+            .mapValues { (_, rs) -> rs.maxBy { it.startMs }.let { it.title to it.metres } }
+        val found = runCatching { Kept.recover(profile, st.moves, missing, runs) }.getOrDefault(emptyMap())
+        if (found.isNotEmpty()) update { it.copy(kept = it.kept + found) }
     }
 
     fun setProfile(p: Profile?) = update { it.copy(profile = p) }
@@ -155,7 +197,7 @@ class Store(context: Context) {
         }
     }
 
-    fun resetPlan() = update { it.copy(profile = null, done = emptySet(), moves = emptyMap()) }
+    fun resetPlan() = update { it.copy(profile = null, done = emptySet(), moves = emptyMap(), kept = emptyMap()) }
 
     // ---- run in progress ------------------------------------------------------------------
 
@@ -304,6 +346,7 @@ class Store(context: Context) {
             put("done", JSONArray(s.done.toList()))
             put("analyticsVersion", s.analyticsVersion)
             put("moves", JSONObject().apply { s.moves.forEach { (id, day) -> put(id, day) } })
+            put("kept", JSONObject().apply { s.kept.forEach { (id, w) -> put(id, workoutToJson(w)) } })
             put("settings", JSONObject().apply {
                 put("voice", s.settings.voice)
                 put("paceAlerts", s.settings.paceAlerts)
@@ -370,7 +413,61 @@ class Store(context: Context) {
                 (0 until a.length()).map { i -> runFromJson(a.getJSONObject(i)) }
             } ?: emptyList()
             val moves = o.optJSONObject("moves")?.let { m -> m.keys().asSequence().associateWith { m.getLong(it) } } ?: emptyMap()
-            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0), moves)
+            // a kept workout that can't be read is dropped: it is taken again from the plan
+            val kept = o.optJSONObject("kept")?.let { k ->
+                k.keys().asSequence().mapNotNull { id -> runCatching { id to workoutFromJson(k.getJSONObject(id)) }.getOrNull() }.toMap()
+            } ?: emptyMap()
+            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0), moves, kept)
+        }
+
+        fun workoutToJson(w: Workout): JSONObject = JSONObject().apply {
+            put("epochDay", w.epochDay)
+            put("planDay", w.planDay)
+            put("week", w.week)
+            put("phase", w.phase.name)
+            put("type", w.type.name)
+            put("note", w.note)
+            fun step(s: Step) = JSONObject().apply {
+                put("kind", s.kind.name)
+                put("secs", s.secs ?: JSONObject.NULL)
+                put("metres", s.metres ?: JSONObject.NULL)
+                put("zone", s.zone?.name ?: JSONObject.NULL)
+                put("hill", s.hill)
+            }
+            put("blocks", JSONArray().apply {
+                w.blocks.forEach { b ->
+                    put(when (b) {
+                        is Single -> JSONObject().put("step", step(b.step))
+                        is Repeat -> JSONObject().put("times", b.times).put("steps", JSONArray().apply { b.steps.forEach { put(step(it)) } })
+                    })
+                }
+            })
+        }
+
+        fun workoutFromJson(o: JSONObject): Workout {
+            fun step(s: JSONObject) = Step(
+                kind = StepKind.valueOf(s.getString("kind")),
+                secs = if (s.isNull("secs")) null else s.getDouble("secs"),
+                metres = if (s.isNull("metres")) null else s.getDouble("metres"),
+                zone = if (s.isNull("zone")) null else Zone.valueOf(s.getString("zone")),
+                hill = s.optBoolean("hill", false),
+            )
+            val blocks = o.getJSONArray("blocks").let { a ->
+                (0 until a.length()).map { i ->
+                    val b = a.getJSONObject(i)
+                    if (b.has("step")) Single(step(b.getJSONObject("step")))
+                    else Repeat(b.getInt("times"), b.getJSONArray("steps").let { sa -> (0 until sa.length()).map { step(sa.getJSONObject(it)) } })
+                }
+            }
+            return Workout(
+                epochDay = o.getLong("epochDay"),
+                week = o.getInt("week"),
+                phase = Phase.valueOf(o.getString("phase")),
+                type = SessionType.valueOf(o.getString("type")),
+                blocks = blocks,
+                note = o.optString("note", ""),
+                planDay = o.optLong("planDay", o.getLong("epochDay")),
+            )
         }
 
         fun runFromJson(r: JSONObject): RunRecord {

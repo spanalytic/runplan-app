@@ -435,4 +435,61 @@ class CoreTest {
         assertEquals(day("2026-10-14"), Dates.epochDay(start, london))
         assertEquals(day("2026-10-15"), Dates.epochDay(start + 20 * 60_000, london))
     }
+
+    @Test fun doneSessionsKeepTheirWorkoutWhenThePlanIsEdited() {
+        val before = PlanBuilder.build(profile)
+        val after = PlanBuilder.build(profile.copy(hills = true))
+        // a week where adding hills changes the first session (and with it the easy runs)
+        val week = (1..after.weeks).first { wk ->
+            before.byWeek().getValue(wk).first().type != after.byWeek().getValue(wk).first().type
+        }
+        val q1 = before.byWeek().getValue(week).first()
+        val easy = before.byWeek().getValue(week).first { it.type == SessionType.EASY }
+        assertTrue(after.find(easy.id) != easy)
+
+        val kept = Kept.apply(after, listOf(q1, easy))
+        assertEquals(q1, kept.find(q1.id))
+        assertEquals(easy, kept.find(easy.id))
+        assertEquals(after.workouts.size, kept.workouts.size)
+        assertEquals(kept.workouts.sortedBy { it.epochDay }, kept.workouts)
+        // sessions not done follow the edited plan
+        val rest = kept.workouts.filter { it.id != q1.id && it.id != easy.id }
+        assertEquals(after.workouts.filter { it.id != q1.id && it.id != easy.id }, rest)
+
+        // a session moved before it was done stays on the day it was done
+        val thu = PlanBuilder.mondayOf(easy.epochDay) + 3
+        val moves = Moves.move(before, emptyMap(), easy, thu)
+        val movedEasy = Moves.apply(before, moves).find(easy.id)!!
+        val shown = Moves.apply(Kept.apply(after, listOf(movedEasy)), moves)
+        assertEquals(movedEasy, shown.on(thu))
+        assertEquals(null, shown.on(easy.planDay))
+
+        // sessions outside the edited plan's dates are left out
+        assertEquals(after, Kept.apply(after, listOf(q1.copy(epochDay = profile.startEpochDay - 7, planDay = profile.startEpochDay - 7))))
+    }
+
+    @Test fun savesFromBeforeKeepingFindThePlanTheRunsWereDoneFrom() {
+        val before = PlanBuilder.build(profile)
+        val edited = profile.copy(hills = true)
+        val week = (1..before.weeks).first { wk ->
+            before.byWeek().getValue(wk).first().type != PlanBuilder.build(edited).byWeek().getValue(wk).first().type
+        }
+        val q1 = before.byWeek().getValue(week).first()
+        val easy = before.byWeek().getValue(week).first { it.type == SessionType.EASY }
+        val runs = mapOf(
+            q1.id to (q1.type.label to q1.estimate(before.paces).first * 1000),
+            easy.id to (easy.type.label to easy.estimate(before.paces).first * 1000),
+        )
+        val found = Kept.recover(edited, emptyMap(), setOf(q1.id, easy.id), runs)
+        assertEquals(q1, found[q1.id])
+        assertEquals(easy, found[easy.id])
+
+        // runs that match the current plan keep it
+        val now = PlanBuilder.build(edited)
+        val nowEasy = now.find(easy.id)!!
+        val same = Kept.recover(edited, emptyMap(), setOf(easy.id), mapOf(easy.id to (nowEasy.type.label to nowEasy.estimate(now.paces).first * 1000)))
+        assertEquals(nowEasy, same[easy.id])
+        // done without a run: taken from the current plan
+        assertEquals(now.find(q1.id), Kept.recover(edited, emptyMap(), setOf(q1.id), emptyMap())[q1.id])
+    }
 }

@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.runplan.app.ui.components.rememberToday
 import dev.runplan.app.RunPlanApp
+import dev.runplan.app.data.RunRecord
 import dev.runplan.app.run.RunPhase
 import dev.runplan.app.run.RunSession
 import dev.runplan.app.ui.components.WorkoutShape
@@ -79,9 +80,11 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
     val byWeek = remember(p) { p.byWeek() }
     // a completed workout opens its recorded run; otherwise the workout details
     val runFor = remember(state.runs) {
-        state.runs.filter { it.workoutId != null }.groupBy { it.workoutId!! }.mapValues { (_, rs) -> rs.maxBy { it.startMs }.id }
+        state.runs.filter { it.workoutId != null }.groupBy { it.workoutId!! }.mapValues { (_, rs) -> rs.maxBy { it.startMs } }
     }
-    val open: (String) -> Unit = { id -> runFor[id]?.let(openRun) ?: openSession(id) }
+    val open: (String) -> Unit = { id -> runFor[id]?.let { openRun(it.id) } ?: openSession(id) }
+    // a done session with a recorded run shows what was actually run
+    val ran: (Workout) -> RunRecord? = { w -> runFor[w.id]?.takeIf { w.id in state.done } }
     val currentWeek = remember(p, today) { p.workouts.firstOrNull { it.epochDay >= today }?.week ?: p.weeks }
     var showEarlier by remember { mutableStateOf(false) }
     // long-press a session to move it to another day of its week
@@ -119,13 +122,13 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
             }
         }
         item {
-            TodayBlock(p, today, state.done, open, startRun)
+            TodayBlock(p, today, state.done, p.on(today)?.let(ran), open, startRun)
         }
         for (week in currentWeek..p.weeks) {
             val ws = byWeek[week] ?: continue
             item(key = "h$week") { WeekHeader(p, week, ws) }
             items(ws, key = { it.id }) { w ->
-                SessionRow(p, w, w.id in state.done, w.epochDay == today, onLongClick = { moving = w.id }.takeIf { movable(w) }) { open(w.id) }
+                SessionRow(p, w, w.id in state.done, ran(w), w.epochDay == today, onLongClick = { moving = w.id }.takeIf { movable(w) }) { open(w.id) }
             }
         }
         if (currentWeek > 1) {
@@ -137,7 +140,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
             if (showEarlier) for (week in 1 until currentWeek) {
                 val ws = byWeek[week] ?: continue
                 item(key = "h$week") { WeekHeader(p, week, ws) }
-                items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, false) { open(w.id) } }
+                items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, ran(w), false) { open(w.id) } }
             }
         }
     }
@@ -145,7 +148,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
 }
 
 @Composable
-private fun TodayBlock(p: Plan, today: Long, done: Set<String>, openSession: (String) -> Unit, startRun: (String?) -> Unit) {
+private fun TodayBlock(p: Plan, today: Long, done: Set<String>, run: RunRecord?, openSession: (String) -> Unit, startRun: (String?) -> Unit) {
     val w = p.on(today)
     Column(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
@@ -165,15 +168,16 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, openSession: (St
         }
         val isDone = w.id in done
         val (km, min) = w.estimate(p.paces)
-        Text(w.type.label, style = MaterialTheme.typography.displaySmall)
+        Text(run?.title ?: w.type.label, style = MaterialTheme.typography.displaySmall)
         Spacer(Modifier.height(4.dp))
-        Text(Fmt.summary(w), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
+        Text(run?.let { ranNote(it) } ?: Fmt.summary(w), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
         Spacer(Modifier.height(20.dp))
         WorkoutShape(bars(w, p.paces), height = 64.dp)
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Stat("%.1f".format(km), "km")
-            if (min < 90) Stat("${min.roundToInt()}", "min")
+            Stat(if (run != null) Fmt.km(run.metres) else "%.1f".format(km), "km")
+            if (run != null) Stat(Fmt.duration(run.sec), "time")
+            else if (min < 90) Stat("${min.roundToInt()}", "min")
             else Stat("${min.roundToInt() / 60}:${(min.roundToInt() % 60).toString().padStart(2, '0')}", "h")
             if (w.note.isNotEmpty()) Text(w.note, style = MaterialTheme.typography.bodySmall, color = Palette.Slate, modifier = Modifier.align(Alignment.CenterVertically))
         }
@@ -195,6 +199,9 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, openSession: (St
     }
     Spacer(Modifier.height(8.dp))
 }
+
+/** "Ran 4.51 km in 32:22". */
+private fun ranNote(r: RunRecord) = "Ran ${Fmt.km(r.metres)} km in ${Fmt.duration(r.sec)}"
 
 @Composable
 private fun Stat(value: String, unit: String) {
@@ -224,7 +231,7 @@ private fun WeekHeader(p: Plan, week: Int, ws: List<Workout>) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
+private fun SessionRow(p: Plan, w: Workout, done: Boolean, run: RunRecord?, isToday: Boolean, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().combinedClickable(onLongClick = onLongClick, onClick = onClick)
             .background(if (isToday) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.background)
@@ -236,8 +243,8 @@ private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onL
             Text("${w.date.dayOfMonth}", style = MaterialTheme.typography.headlineSmall)
         }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp).alpha(if (done) 0.55f else 1f)) {
-            Text(w.type.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
-            Text(Fmt.summary(w), style = MaterialTheme.typography.bodySmall, color = Palette.Slate, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(run?.title ?: w.type.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+            Text(run?.let { ranNote(it) } ?: Fmt.summary(w), style = MaterialTheme.typography.bodySmall, color = Palette.Slate, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (w.moved) Text(movedNote(w), style = MaterialTheme.typography.labelSmall, color = Palette.Slate, maxLines = 1)
         }
         Column(Modifier.width(72.dp), horizontalAlignment = Alignment.End) {
@@ -247,7 +254,7 @@ private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onL
                 WorkoutShape(bars(w, p.paces), height = 22.dp, gap = 1.dp)
             }
             Spacer(Modifier.height(4.dp))
-            Text(Fmt.estimate(w.estimate(p.paces).second * 60), style = MaterialTheme.typography.labelMedium, color = Palette.Slate)
+            Text(run?.let { Fmt.duration(it.sec) } ?: Fmt.estimate(w.estimate(p.paces).second * 60), style = MaterialTheme.typography.labelMedium, color = Palette.Slate)
         }
     }
 }
