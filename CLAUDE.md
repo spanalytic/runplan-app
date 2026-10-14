@@ -36,5 +36,6 @@ The sandbox can't reach Maven or Google, so `gradle` can't build here. To compil
 ## Conventions
 
 - Plain-English UI and spoken text, British spelling, metric units.
-- Stored data is JSON (`state.json`) plus one CSV per GPS track. New fields need defaults so old saves still load. Bump `Store.ANALYTICS_VERSION` when derived numbers (best efforts, climb) are calculated differently, so saved runs get recalculated.
+- Stored data is JSON (`state.json`) plus one CSV per GPS track. New fields need defaults so old saves still load. A damaged `state.json` is never overwritten: it is copied aside and `state.json.bak` (taken at each clean start) is used.
+- While a run records, `RunService` saves progress every 15 s (`run-in-progress.json` plus the track CSV). If the app dies mid-run, the next start saves the run from that file and tells the user. Bump `Store.ANALYTICS_VERSION` when derived numbers (best efforts, climb) are calculated differently, so saved runs get recalculated.
 - Add a core test with any engine or plan change.

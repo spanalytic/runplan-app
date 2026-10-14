@@ -36,9 +36,11 @@ import dev.runplan.core.RunEngine
 import dev.runplan.core.RunStep
 import dev.runplan.core.SessionType
 import dev.runplan.core.StepKind
+import dev.runplan.core.StepResult
 import dev.runplan.core.TrackPoint
 import dev.runplan.core.WearPaths
 import dev.runplan.core.Workout
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -48,6 +50,7 @@ import java.time.LocalDate
 /**
  * Foreground service that records a run: GPS -> [Odometer] -> [RunEngine] -> speech, watch, UI.
  * Lifecycle: PREPARE (GPS warms up, READY) -> START -> PAUSE/RESUME/SKIP -> FINISH (saved) or DISCARD.
+ * While recording, progress is saved every [CHECKPOINT_MS] so a crash keeps the run (see Store.saveCheckpoint).
  */
 class RunService : LifecycleService() {
 
@@ -69,6 +72,11 @@ class RunService : LifecycleService() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var locationManager: LocationManager? = null
     private var sensorManager: SensorManager? = null
+    private var checkpointJob: Job? = null
+    private var lastCheckpointMs = 0L
+    /** Guards [checkpointsOn] so a save in flight can't bring back a run that was just saved or discarded. */
+    private val checkpointLock = Any()
+    private var checkpointsOn = false
 
     /** Barometric pressure (hPa), lightly smoothed; NaN on phones without a barometer. Climb uses it. */
     @Volatile private var pressureHpa = Float.NaN
@@ -123,8 +131,12 @@ class RunService : LifecycleService() {
             ACTION_SKIP -> skip()
             ACTION_FINISH -> finish(save = true)
             ACTION_DISCARD -> finish(save = false)
+            // restarted by the system after the app was closed mid-run: the run was already
+            // recovered from its last saved progress when the app started, so just stop
+            null -> if (phase == RunPhase.IDLE) stopSelf(startId)
         }
-        return START_NOT_STICKY
+        // ask to be restarted if killed, so an interrupted run is recovered straight away
+        return START_STICKY
     }
 
     // ---- lifecycle ------------------------------------------------------------------------
@@ -162,6 +174,7 @@ class RunService : LifecycleService() {
                 tick()
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastPublish >= 1000) { publish(); lastPublish = now }
+                if (now - lastCheckpointMs >= CHECKPOINT_MS) checkpoint()
                 delay(250)
             }
         }
@@ -197,8 +210,10 @@ class RunService : LifecycleService() {
         startClockMs = SystemClock.elapsedRealtime()
         resumedAtMs = SystemClock.elapsedRealtime()
         odo.resume()
+        synchronized(checkpointLock) { checkpointsOn = true }
         handle(e.start())
         publish()
+        checkpoint()
     }
 
     private fun pause() {
@@ -208,6 +223,7 @@ class RunService : LifecycleService() {
         phase = RunPhase.PAUSED
         if (store.state.value.settings.voice) speaker.speak("Paused.", interrupt = true)
         publish()
+        checkpoint()
     }
 
     private fun resume() {
@@ -275,9 +291,41 @@ class RunService : LifecycleService() {
         notify(title, text)
     }
 
+    /** The run as it stands, without ending it. */
+    private fun record(e: RunEngine, sec: Double, steps: List<StepResult>) = RunRecord(
+        id = startWallMs.toString(),
+        epochDay = LocalDate.now().toEpochDay(),
+        workoutId = workoutId,
+        title = e.title,
+        startMs = startWallMs,
+        sec = sec,
+        metres = odo.distanceM,
+        steps = steps,
+        splits = e.splits.toList(),
+        startClockMs = startClockMs,
+        stepStartsMs = stepStarts.toList(),
+    )
+
+    /** Save progress in the background; skipped if the last save is still being written. */
+    private fun checkpoint() {
+        val e = engine ?: return
+        if (phase != RunPhase.RUNNING && phase != RunPhase.PAUSED) return
+        if (checkpointJob?.isActive == true) return
+        lastCheckpointMs = SystemClock.elapsedRealtime()
+        val r = record(e, activeMs() / 1000.0, e.resultsSoFar())
+        val pts = odo.points.toList()
+        checkpointJob = lifecycleScope.launch(Dispatchers.IO) {
+            synchronized(checkpointLock) {
+                if (checkpointsOn) runCatching { store.saveCheckpoint(r, pts) }
+            }
+        }
+    }
+
     private fun finish(save: Boolean) {
         if (phase == RunPhase.IDLE || phase == RunPhase.SAVED) return
         val e = engine
+        val recording = phase != RunPhase.READY
+        synchronized(checkpointLock) { checkpointsOn = false }
         if (phase == RunPhase.RUNNING) activeAccumMs += SystemClock.elapsedRealtime() - resumedAtMs
         var savedId: String? = null
         if (save && e != null && phase != RunPhase.READY) {
@@ -285,28 +333,14 @@ class RunService : LifecycleService() {
             // (empty when the engine already finished on its own and spoke it)
             val wrapUp = e.finish()
             if (store.state.value.settings.voice) wrapUp.forEach { speaker.speak(it.speech()) }
-            val id = startWallMs.toString()
             val (efforts, ascent) = store.analyse(odo.points)
-            store.addRun(
-                RunRecord(
-                    id = id,
-                    epochDay = LocalDate.now().toEpochDay(),
-                    workoutId = workoutId,
-                    title = e.title,
-                    startMs = startWallMs,
-                    sec = activeAccumMs / 1000.0,
-                    metres = odo.distanceM,
-                    steps = e.results.toList(),
-                    splits = e.splits.toList(),
-                    startClockMs = startClockMs,
-                    stepStartsMs = stepStarts.toList(),
-                    efforts = efforts,
-                    ascentM = ascent,
-                ),
-                odo.points.toList(),
-            )
-            savedId = id
+            val r = record(e, activeAccumMs / 1000.0, e.results.toList()).copy(efforts = efforts, ascentM = ascent)
+            store.addRun(r, odo.points.toList())
+            store.clearCheckpoint()
+            savedId = r.id
             watch.send(e.state(paused = false, gpsOk = true))
+        } else if (recording) {
+            store.clearCheckpoint(discardTrackOf = startWallMs.toString())
         }
         phase = if (savedId != null) RunPhase.SAVED else RunPhase.IDLE
         RunSession.update { it.copy(phase = phase, savedRunId = savedId) }
@@ -370,6 +404,7 @@ class RunService : LifecycleService() {
     companion object {
         private const val NOTIFICATION_ID = 7
         private const val COUNTDOWN_SEC = 5
+        private const val CHECKPOINT_MS = 15_000L
         /** Step label prefix while counting down; the watch matches on it. */
         const val STARTING_IN = "Starting in "
         const val ACTION_PREPARE = "prepare"

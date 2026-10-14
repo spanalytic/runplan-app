@@ -189,6 +189,25 @@ class CoreTest {
         assertTrue(simulate(RunEngine("x", listOf(st))) { 380.0 }.first { it.second is Cue.PaceAlert }.second.speech().startsWith("Ease off."))
     }
 
+    @Test fun resultsSoFarIncludeTheStepInProgressWithoutEndingIt() {
+        val a = RunStep("Warm-up", StepKind.WARMUP, 600.0, null, null, Double.NaN, Double.NaN)
+        val b = RunStep("Run", StepKind.INTERVAL, null, 1000.0, null, Double.NaN, Double.NaN)
+        val eng = RunEngine("t", listOf(a, b))
+        eng.start()
+        eng.update(300_000, 900.0, 333.0)
+        assertEquals(listOf(300.0), eng.resultsSoFar().map { it.sec })
+        assertTrue(eng.results.isEmpty())
+        eng.update(600_000, 1800.0, 333.0)   // warm-up done, rep under way
+        eng.update(660_000, 2000.0, 300.0)
+        val soFar = eng.resultsSoFar()
+        assertEquals(listOf("Warm-up", "Run"), soFar.map { it.label })
+        assertEquals(200.0, soFar[1].metres, 0.01)
+        assertEquals(1, eng.results.size)
+        assertTrue(!eng.finished)
+        eng.finish()
+        assertEquals(eng.results.toList(), eng.resultsSoFar())
+    }
+
     @Test fun storedEasyResultKeepsItsCeiling() {
         // slow is +Inf in memory but read back from storage as NaN
         val r = StepResult("Easy", "E", 403.0, Double.NaN, 1938.0, 4500.0)

@@ -3,6 +3,7 @@ package dev.runplan.app
 import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.widget.Toast
 import dev.runplan.app.data.BugReport
 import dev.runplan.app.data.Store
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,7 @@ class RunPlanApp : Application() {
         BugReport.install(this)
         instance = this
         store = Store(this)
+        store.notices.forEach { Toast.makeText(this, it, Toast.LENGTH_LONG).show() }
         Configuration.getInstance().apply {
             userAgentValue = packageName
             osmdroidBasePath = File(cacheDir, "osmdroid")

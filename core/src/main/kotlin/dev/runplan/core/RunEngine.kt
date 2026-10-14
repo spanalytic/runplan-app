@@ -458,6 +458,11 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         }
     }
 
+    /** Step results so far, including the step in progress, without ending it (for saving progress mid-run). */
+    fun resultsSoFar(): List<StepResult> =
+        if (finished) results.toList()
+        else results + StepResult(current.label, current.zoneCode, current.fast, current.slow, stepSec(), stepM())
+
     /** End early: record the partial step. */
     fun finish(): List<Cue> {
         if (finished) return emptyList()
