@@ -88,7 +88,7 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
             )
             Spacer(Modifier.height(8.dp))
             Zone.entries.forEach { z ->
-                val (f, s) = p.band(z)
+                val (f, s) = p.target(z)
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(width = 6.dp, height = 30.dp).clip(RoundedCornerShape(3.dp)).background(Palette.zone(z)))
                     Spacer(Modifier.width(12.dp))

@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
     private var lastStatus = PaceStatus.NONE
     private var lastStep = -1
     private var lastFinished = false
+    private var lastLabel = ""
     private var lastBuzzMs = 0L
 
     private val listener = MessageClient.OnMessageReceivedListener { ev ->
@@ -60,7 +61,10 @@ class MainActivity : ComponentActivity() {
     private fun onState(s: RunState) {
         state.value = s
         lastMessageMs.longValue = SystemClock.elapsedRealtime()
-        val running = s.stepCount > 0 && !s.finished && !s.paused && s.stepLabel != "Ready" && s.stepLabel != "Finding GPS"
+        val counting = s.stepLabel.startsWith("Starting in ")
+        val running = s.stepCount > 0 && !s.finished && !s.paused && s.stepLabel != "Ready" && s.stepLabel != "Finding GPS" && !counting
+        if (counting && s.stepLabel != lastLabel) buzz(longArrayOf(0, 60))   // tick each second of the start countdown
+        lastLabel = s.stepLabel
 
         // keep the display on only while a run is live
         if (s.stepCount > 0 && !s.finished) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)

@@ -115,6 +115,15 @@ data class Paces(
 
     fun centre(z: Zone): Double = band(z).let { (f, s) -> (f + s) / 2 }
 
+    /**
+     * Easy has no slow limit during a run, only a ceiling: anything slower than marathon pace
+     * counts as easy, so you're only told to ease off when you're well past easy effort.
+     */
+    val easyCap: Double get() = marathon
+
+    /** What the run coaches against. Same as [band], except Easy is "[easyCap] or slower" (slow = +Inf). */
+    fun target(z: Zone): Pair<Double, Double> = if (z == Zone.E) easyCap to Double.POSITIVE_INFINITY else band(z)
+
     /** Jog pace used to estimate recovery-step distance. */
     val jog: Double get() = easySlow + 20
 

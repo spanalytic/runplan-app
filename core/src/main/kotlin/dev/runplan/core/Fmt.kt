@@ -10,7 +10,9 @@ object Fmt {
         return "${s / 60}:${(s % 60).toString().padStart(2, '0')}"
     }
 
-    fun band(fast: Double, slow: Double): String = "${pace(fast)}–${pace(slow)}"
+    /** "5:03–5:13", or "6:43 or slower" for a ceiling-only band (slow not finite). */
+    fun band(fast: Double, slow: Double): String =
+        if (fast.isFinite() && !slow.isFinite()) "${pace(fast)} or slower" else "${pace(fast)}–${pace(slow)}"
 
     /** 3725 -> "1:02:05", 325 -> "5:25". */
     fun duration(sec: Double): String {

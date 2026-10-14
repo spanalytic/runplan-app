@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -30,7 +32,8 @@ class Speaker(context: Context) {
         .build()
     private val pending = AtomicInteger(0)
     @Volatile private var lastDoneMs = 0L
-    private var ready = false
+    @Volatile private var ready = false
+    @Volatile private var held = false
     private val queued = ArrayList<Pair<String, Boolean>>()
 
     private val tts: TextToSpeech = TextToSpeech(context.applicationContext) { status ->
@@ -83,6 +86,45 @@ class Speaker(context: Context) {
             tts.playSilentUtterance(lead, TextToSpeech.QUEUE_ADD, "lead${System.nanoTime()}")
         }
         tts.speak(text, TextToSpeech.QUEUE_ADD, null, "u${System.nanoTime()}")
+    }
+
+    /**
+     * Keep audio focus (music ducked) across several short utterances, e.g. the start countdown,
+     * so the music doesn't bob up and down between words and each word plays without a lead-in.
+     */
+    fun hold() {
+        if (held || !ready) return
+        held = true
+        val idle = pending.get() == 0
+        pending.incrementAndGet()
+        if (idle) {
+            audio.requestAudioFocus(focus)
+            tts.playSilentUtterance(LEAD_MS, TextToSpeech.QUEUE_ADD, "lead${System.nanoTime()}")
+        }
+    }
+
+    /** End a [hold]; focus is released once anything still queued has been spoken. */
+    fun unhold() {
+        if (!held) return
+        held = false
+        release("hold")
+    }
+
+    /**
+     * Shut down once everything queued has been spoken (or after [maxWaitMs]). The service stops a
+     * few seconds after the run ends, and stopping TTS immediately cut the finish message off.
+     */
+    fun shutdownWhenQuiet(maxWaitMs: Long = 30_000) {
+        unhold()
+        val main = Handler(Looper.getMainLooper())
+        val deadline = SystemClock.elapsedRealtime() + maxWaitMs
+        main.post(object : Runnable {
+            override fun run() {
+                val busy = synchronized(queued) { queued.isNotEmpty() } ||
+                    (ready && (pending.get() > 0 || runCatching { tts.isSpeaking }.getOrDefault(false)))
+                if (busy && SystemClock.elapsedRealtime() < deadline) main.postDelayed(this, 250) else shutdown()
+            }
+        })
     }
 
     fun shutdown() {

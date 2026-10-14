@@ -77,7 +77,8 @@ object PaceZones {
     fun of(pace: Double, p: Paces): Zone? {
         if (!pace.isFinite()) return null
         val centres = listOf(Zone.E to (p.easyFast + p.easySlow) / 2, Zone.M to p.marathon, Zone.T to p.threshold, Zone.I to p.interval, Zone.R to p.rep)
-        if (pace >= p.easySlow) return Zone.E
+        // matches the run coaching: slower than marathon pace is easy
+        if (pace > p.easyCap + Paces.TOLERANCE) return Zone.E
         return centres.minBy { kotlin.math.abs(it.second - pace) }.first
     }
 }

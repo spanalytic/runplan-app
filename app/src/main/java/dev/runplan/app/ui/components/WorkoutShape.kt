@@ -28,7 +28,7 @@ fun bars(w: Workout, p: Paces): List<Bar> = w.flatSteps().map { s ->
 }
 
 fun bars(steps: List<RunStep>, p: Paces?): List<Bar> = steps.map { s ->
-    val pace = if (s.hasTarget) (s.fast + s.slow) / 2 else p?.jog ?: 400.0
+    val pace = s.typical.takeIf { it.isFinite() } ?: p?.jog ?: 400.0
     val sec = s.secs ?: s.metres?.let { it / 1000 * pace } ?: 600.0
     Bar(sec.toFloat(), s.zone)
 }

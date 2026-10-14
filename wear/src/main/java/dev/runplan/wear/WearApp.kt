@@ -69,7 +69,8 @@ fun WearApp(state: RunState, lastMessageMs: Long, send: (String) -> Unit) {
     LaunchedEffect(Unit) { while (true) { delay(1000); now = SystemClock.elapsedRealtime() } }
     val stale = lastMessageMs == 0L || (now - lastMessageMs > 6_000 && !state.finished)
 
-    val ready = state.stepLabel == "Ready" || state.stepLabel == "Finding GPS"
+    val countdown = state.stepLabel.takeIf { it.startsWith("Starting in ") }?.removePrefix("Starting in ")
+    val ready = state.stepLabel == "Ready" || state.stepLabel == "Finding GPS" || countdown != null
     val status = if (stale || ready || state.paused) PaceStatus.NONE else state.status
     val (fieldTarget, inkTarget) = when (status) {
         PaceStatus.SLOW -> Amber to Ink
@@ -91,6 +92,11 @@ fun WearApp(state: RunState, lastMessageMs: Long, send: (String) -> Unit) {
                     Text("Done", style = style(34, FontWeight.Bold), color = ink)
                     Text("${Fmt.km(state.distanceM)} km", style = style(22), color = ink)
                     Text(Fmt.duration(state.elapsedSec), style = style(18), color = ink.copy(alpha = 0.7f))
+                }
+
+                countdown != null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Starting in", style = style(18), color = ink.copy(alpha = 0.7f))
+                    Text(countdown, style = style(72, FontWeight.Bold), color = ink)
                 }
 
                 ready -> Column(horizontalAlignment = Alignment.CenterHorizontally) {

@@ -15,6 +15,8 @@ data class SessionView(
     val steps: List<RunStep> = emptyList(),
     val state: RunState = RunState.IDLE,
     val savedRunId: String? = null,
+    /** Seconds left in the start countdown (READY phase), 0 when not counting down. */
+    val countdown: Int = 0,
 )
 
 /** Process-wide bridge between [RunService] and the UI. */

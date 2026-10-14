@@ -60,6 +60,8 @@ class RunService : LifecycleService() {
     private var startClockMs = 0L
     private val stepStarts = ArrayList<Long>()
     private var ticker: Job? = null
+    private var countdownJob: Job? = null
+    private var countdown = 0
     private var wakeLock: PowerManager.WakeLock? = null
     private var locationManager: LocationManager? = null
 
@@ -143,7 +145,29 @@ class RunService : LifecycleService() {
         }
     }
 
+    /** Start pressed (phone or watch): count down 5 seconds, then start recording. */
     private fun start() {
+        if (engine == null || phase != RunPhase.READY || countdownJob != null) return
+        countdownJob = lifecycleScope.launch {
+            val voice = store.state.value.settings.voice
+            if (voice) speaker.hold()
+            for (n in COUNTDOWN_SEC downTo 1) {
+                countdown = n
+                RunSession.update { it.copy(countdown = n) }
+                publish()
+                if (voice) speaker.speak(n.toString())
+                buzz(longArrayOf(0, 60))
+                delay(1000)
+            }
+            countdown = 0
+            RunSession.update { it.copy(countdown = 0) }
+            countdownJob = null
+            begin()
+            if (voice) speaker.unhold()
+        }
+    }
+
+    private fun begin() {
         val e = engine ?: return
         if (phase != RunPhase.READY) return
         phase = RunPhase.RUNNING
@@ -217,7 +241,11 @@ class RunService : LifecycleService() {
         val now = SystemClock.elapsedRealtime()
         if (phase == RunPhase.RUNNING) handle(e.update(activeMs(), odo.distanceM, odo.pace(now)))
         val st = e.state(paused = phase == RunPhase.PAUSED, gpsOk = odo.gpsOk(now))
-        val shown = if (phase == RunPhase.READY) st.copy(stepLabel = if (st.gpsOk) "Ready" else "Finding GPS") else st
+        val shown = if (phase == RunPhase.READY) st.copy(stepLabel = when {
+            countdown > 0 -> "$STARTING_IN$countdown"
+            st.gpsOk -> "Ready"
+            else -> "Finding GPS"
+        }) else st
         RunSession.update { it.copy(phase = phase, state = shown) }
         watch.send(shown)
         val title = if (phase == RunPhase.READY) shown.stepLabel else "${st.stepLabel}  ${Fmt.pace(st.pace)}/km"
@@ -231,7 +259,10 @@ class RunService : LifecycleService() {
         if (phase == RunPhase.RUNNING) activeAccumMs += SystemClock.elapsedRealtime() - resumedAtMs
         var savedId: String? = null
         if (save && e != null && phase != RunPhase.READY) {
-            e.finish()
+            // ended from the Finish button: say the same wrap-up as a completed workout
+            // (empty when the engine already finished on its own and spoke it)
+            val wrapUp = e.finish()
+            if (store.state.value.settings.voice) wrapUp.forEach { speaker.speak(it.speech()) }
             val id = startWallMs.toString()
             val (efforts, ascent) = store.analyse(odo.points)
             store.addRun(
@@ -262,6 +293,8 @@ class RunService : LifecycleService() {
     }
 
     private fun stopEverything() {
+        countdownJob?.cancel()
+        countdownJob = null
         ticker?.cancel()
         runCatching { locationManager?.removeUpdates(locationListener) }
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
@@ -272,7 +305,7 @@ class RunService : LifecycleService() {
     override fun onDestroy() {
         if (phase == RunPhase.RUNNING || phase == RunPhase.PAUSED) finish(save = true)
         watch.stop()
-        speaker.shutdown()
+        speaker.shutdownWhenQuiet()
         super.onDestroy()
     }
 
@@ -313,6 +346,9 @@ class RunService : LifecycleService() {
 
     companion object {
         private const val NOTIFICATION_ID = 7
+        private const val COUNTDOWN_SEC = 5
+        /** Step label prefix while counting down; the watch matches on it. */
+        const val STARTING_IN = "Starting in "
         const val ACTION_PREPARE = "prepare"
         const val ACTION_START = "start"
         const val ACTION_PAUSE = "pause"

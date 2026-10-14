@@ -123,7 +123,7 @@ private fun StepLine(s: Step, p: Paces, indent: Boolean) {
                 Text(Fmt.amount(s), style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
             }
             s.zone?.let { z ->
-                val (f, sl) = p.band(z)
+                val (f, sl) = p.target(z)
                 Column(horizontalAlignment = Alignment.End) {
                     Text(Fmt.band(f, sl), style = MaterialTheme.typography.headlineSmall)
                     Text("per km", style = MaterialTheme.typography.labelSmall, color = Palette.Slate)

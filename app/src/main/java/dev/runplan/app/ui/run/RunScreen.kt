@@ -105,7 +105,15 @@ fun RunScreen(onSaved: (String) -> Unit, onDiscarded: () -> Unit) {
                     Spacer(Modifier.weight(1f))
                 }
 
-                RunPhase.READY -> {
+                RunPhase.READY -> if (view.countdown > 0) {
+                    Spacer(Modifier.weight(1f))
+                    Text("Starting in", style = MaterialTheme.typography.headlineSmall, color = sub, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Text("${view.countdown}", style = Huge, color = ink, modifier = Modifier.align(Alignment.CenterHorizontally))
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { RunService.send(ctx, RunService.ACTION_DISCARD); onDiscarded() }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                        Text("Cancel", color = ink)
+                    }
+                } else {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(s.title, style = MaterialTheme.typography.headlineMedium, color = ink, modifier = Modifier.weight(1f))
                         GpsBadge(s.gpsOk, ink)
