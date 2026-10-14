@@ -14,7 +14,13 @@ data class RunStep(
     val slow: Double,
     /** Typical pace for this step (zone centre), for estimating duration. NaN when there is no zone. */
     val typical: Double = Double.NaN,
+    /** Uphill by effort (or the way back down for a recovery). No pace target. */
+    val hill: Boolean = false,
 ) {
+    /** Stored/sent zone code: the zone, "H" for a hill effort, "" otherwise. */
+    val zoneCode: String get() = zone?.code ?: if (hill && kind == StepKind.INTERVAL) HILL_CODE else ""
+    /** Zone used to colour and size the step in a workout shape: hill efforts show as hard. */
+    val shapeZone: Zone? get() = zone ?: if (hill && kind == StepKind.INTERVAL) Zone.I else null
     val hasTarget: Boolean get() = zone != null && fast.isFinite()
     /** Only a "no faster than" limit (easy running): there is no too-slow. */
     val capOnly: Boolean get() = hasTarget && !slow.isFinite()
@@ -26,15 +32,23 @@ data class RunStep(
             secs != null -> Fmt.minutes(secs)
             else -> "Open"
         }
-        return if (hasTarget) "$amt @ ${Fmt.band(fast, slow)}" else "$amt ${if (kind == StepKind.RECOVERY) "jog" else ""}".trim()
+        return when {
+            hasTarget -> "$amt @ ${Fmt.band(fast, slow)}"
+            hill && kind == StepKind.INTERVAL -> "$amt hard uphill"
+            hill && kind == StepKind.RECOVERY -> "$amt back down"
+            kind == StepKind.RECOVERY -> "$amt jog"
+            else -> amt
+        }
     }
 
     companion object {
+        const val HILL_CODE = "H"
+
         fun flatten(w: Workout, p: Paces): List<RunStep> {
             val out = ArrayList<RunStep>()
             fun add(st: Step, label: String) {
                 val (f, s) = st.zone?.let { p.target(it) } ?: (Double.NaN to Double.NaN)
-                out += RunStep(label, st.kind, st.secs, st.metres, st.zone, f, s, st.zone?.let { p.centre(it) } ?: Double.NaN)
+                out += RunStep(label, st.kind, st.secs, st.metres, st.zone, f, s, st.zone?.let { p.centre(it) } ?: Double.NaN, st.hill)
             }
             fun baseLabel(st: Step) = when (st.kind) {
                 StepKind.WARMUP -> "Warm-up"
@@ -46,7 +60,11 @@ data class RunStep(
                 is Single -> add(b.step, baseLabel(b.step))
                 is Repeat -> for (i in 1..b.times) for (st in b.steps) {
                     val lbl = when (st.kind) {
-                        StepKind.INTERVAL -> "Rep $i of ${b.times}"
+                        StepKind.INTERVAL -> when {
+                            !st.hill -> "Rep $i of ${b.times}"
+                            w.type == SessionType.HILL_SPRINTS -> "Hill sprint $i of ${b.times}"
+                            else -> "Hill rep $i of ${b.times}"
+                        }
                         StepKind.RECOVERY -> "Recovery $i of ${b.times}"
                         else -> baseLabel(st)
                     }
@@ -115,7 +133,7 @@ sealed interface Cue {
             StepKind.WARMUP -> "Let's go."
             StepKind.COOLDOWN -> "Last one."
             StepKind.RECOVERY -> "Recover."
-            StepKind.INTERVAL -> if (st.zone == null || st.zone == Zone.E) "Keep going." else "Go!"
+            StepKind.INTERVAL -> if (st.hill || (st.zone != null && st.zone != Zone.E)) "Go!" else "Keep going."
         }
 
         /** "1 minute at 5 26 per kilometre", "2 minutes easy jog", "12 kilometres at 7 15 per kilometre". */
@@ -126,6 +144,8 @@ sealed interface Cue {
                 else -> "Run as you like"
             }
             return when {
+                st.hill && st.kind == StepKind.INTERVAL -> "$amt, hard uphill"
+                st.hill && st.kind == StepKind.RECOVERY -> "$amt, walk or jog back down"
                 st.capOnly -> "$amt, no faster than ${spokenPace(st.fast)} per kilometre"
                 st.hasTarget -> "$amt at ${spokenPace((st.fast + st.slow) / 2)} per kilometre"
                 st.kind == StepKind.RECOVERY -> "$amt easy jog"
@@ -392,7 +412,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     /** Close the current step and move on (also used for "skip"). */
     fun advance(): List<Cue> {
         if (finished) return emptyList()
-        val done = StepResult(current.label, current.zone?.code ?: "", current.fast, current.slow, stepSec(), stepM())
+        val done = StepResult(current.label, current.zoneCode, current.fast, current.slow, stepSec(), stepM())
         results += done
         stepStartMs = elapsedMs
         stepStartM = distanceM
@@ -412,7 +432,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     /** End early: record the partial step. */
     fun finish(): List<Cue> {
         if (finished) return emptyList()
-        val done = StepResult(current.label, current.zone?.code ?: "", current.fast, current.slow, stepSec(), stepM())
+        val done = StepResult(current.label, current.zoneCode, current.fast, current.slow, stepSec(), stepM())
         results += done
         finished = true
         return listOf(finishedCue(done))
@@ -437,7 +457,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             stepLabel = if (finished) "Done" else st.label,
             stepIndex = index,
             stepCount = steps.size,
-            zoneCode = st.zone?.code ?: "",
+            zoneCode = st.zoneCode,
             fast = st.fast,
             slow = st.slow,
             pace = pace,

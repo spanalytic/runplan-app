@@ -4,13 +4,27 @@ import java.time.LocalDate
 
 enum class StepKind { WARMUP, INTERVAL, RECOVERY, COOLDOWN }
 
-/** One step. Exactly one of [secs]/[metres] is set, or neither for an open-ended step. */
+/**
+ * One step. Exactly one of [secs]/[metres] is set, or neither for an open-ended step.
+ * [hill] steps are run uphill by effort (no pace target); their recoveries go back down.
+ */
 data class Step(
     val kind: StepKind,
     val secs: Double? = null,
     val metres: Double? = null,
     val zone: Zone? = null,
-)
+    val hill: Boolean = false,
+) {
+    /** Zone used to colour and size the step in a workout shape: hill efforts show as hard. */
+    val shapeZone: Zone? get() = zone ?: if (hill && kind == StepKind.INTERVAL) Zone.I else null
+}
+
+/** How hilly the goal race is. Decides how often hill repeats replace interval sessions. */
+enum class Terrain(val label: String, val help: String) {
+    FLAT("Flat", "Little or no climbing"),
+    ROLLING("Rolling", "Some short climbs"),
+    HILLY("Hilly", "Long or steep climbs"),
+}
 
 sealed interface Block
 data class Single(val step: Step) : Block
@@ -30,6 +44,8 @@ enum class Phase(val label: String) { BASE("Base"), BUILD("Build"), PEAK("Peak")
 
 enum class SessionType(val label: String, val quality: Boolean) {
     STRIDES("Strides", true),
+    HILL_SPRINTS("Hill sprints", true),
+    HILL_REPEATS("Hill repeats", true),
     INTERVALS("Intervals", true),
     THRESHOLD("Tempo intervals", true),
     TEMPO("Tempo run", true),
@@ -97,6 +113,9 @@ data class Profile(
     val days: List<Int>,
     val currentKm: Double,
     val peakKm: Double? = null,
+    val terrain: Terrain = Terrain.FLAT,
+    /** Swap some interval and strides sessions for hill sessions. */
+    val hills: Boolean = false,
 ) {
     val paces: Paces get() = Paces.of(recentDistance, recentSec, goal.distance)
 }

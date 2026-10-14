@@ -2,7 +2,7 @@
 
 A free, rules-based training plan and pace coach for Android, with a Galaxy Watch (Wear OS) display.
 
-- **Plan:** answer five questions (recent race, goal, race day, run days, weekly km). You get a periodised plan of Base, Build, Peak and Taper, with training paces from the Daniels VDOT model.
+- **Plan:** answer six questions (recent race, goal, how hilly the race is, race day, run days, weekly km). You get a periodised plan of Base, Build, Peak and Taper, with training paces from the Daniels VDOT model. With hill sessions on, hill sprints replace some strides in Base and hill repeats replace some intervals in Build (more often for a hillier race); hills are run by effort, with no pace alerts.
 - **Run:** a 5-second countdown, then the phone records GPS and talks you through each step ("Rep 2 of 5, 5 minutes at 5:03 to 5:13"). It warns "speed up" or "ease off" when you leave the target band. Easy running has only a limit (no faster than marathon pace), with reminders spaced further apart each time. It announces kilometre splits on easy and long runs, "one minute" or "200 metres left in the workout" near the end, and finishes with "Workout complete", the last lap and a summary.
 - **Watch:** shows the step, target band, current pace and time left. It buzzes on step changes and when you go off pace, and can start, pause and skip steps.
 - **History:** step-by-step results against target, and a map of each run with the route coloured by pace zone (OpenStreetMap tiles, no API key). Exports: GPX, TCX (one lap per step), steps CSV and raw GPS CSV.

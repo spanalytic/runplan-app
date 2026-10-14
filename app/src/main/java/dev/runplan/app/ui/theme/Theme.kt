@@ -38,7 +38,8 @@ object Palette {
         null -> Color(0xFFC3CAD3)
     }
 
-    fun zone(code: String): Color = zone(Zone.entries.firstOrNull { it.code == code })
+    /** By stored zone code; "H" (hill effort) shows as hard. */
+    fun zone(code: String): Color = if (code == "H") zone(Zone.I) else zone(Zone.entries.firstOrNull { it.code == code })
 
     /** Relative intensity used for bar heights in the workout shape. */
     fun height(z: Zone?): Float = when (z) {

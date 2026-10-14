@@ -62,6 +62,11 @@ object Fmt {
         }
     }
 
-    private fun stepShort(s: Step): String =
-        amount(s) + (s.zone?.let { " ${it.word}" } ?: if (s.kind == StepKind.RECOVERY) " jog" else "")
+    private fun stepShort(s: Step): String = amount(s) + when {
+        s.zone != null -> " ${s.zone.word}"
+        s.hill && s.kind == StepKind.INTERVAL -> " uphill"
+        s.hill && s.kind == StepKind.RECOVERY -> " back down"
+        s.kind == StepKind.RECOVERY -> " jog"
+        else -> ""
+    }
 }

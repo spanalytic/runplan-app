@@ -61,8 +61,45 @@ object PlanBuilder {
         return Phase.PEAK to 1.0
     }
 
-    private fun s(kind: StepKind, secs: Double? = null, metres: Double? = null, zone: Zone? = null) =
-        Step(kind, secs, metres, zone)
+    private fun s(kind: StepKind, secs: Double? = null, metres: Double? = null, zone: Zone? = null, hill: Boolean = false) =
+        Step(kind, secs, metres, zone, hill)
+
+    /**
+     * Hill session that replaces the week's first quality session, or null. Only when hills are
+     * switched on, never in the taper.
+     * - Base: every other week, hill sprints (short, steep, full recovery) in place of strides.
+     * - Build: hill repeats in place of intervals, every 4th / 3rd / 2nd week for a flat /
+     *   rolling / hilly race.
+     * - Peak: hilly races keep hill repeats every 3rd week; others go race-specific.
+     */
+    private fun hillSession(profile: Profile, phase: Phase, t: Double, i: Int, taper: Boolean): Pair<SessionType, List<Block>>? {
+        if (!profile.hills || taper) return null
+        val wu = Single(s(StepKind.WARMUP, secs = 15 * 60.0, zone = Zone.E))
+        val cd = Single(s(StepKind.COOLDOWN, secs = 10 * 60.0, zone = Zone.E))
+        fun repeats(rep: Double, n: Int): Pair<SessionType, List<Block>> {
+            val down = max(60.0, pyRound(rep * 1.5 / 15) * 15)
+            return SessionType.HILL_REPEATS to listOf(wu, Repeat(n, listOf(s(StepKind.INTERVAL, rep, hill = true), s(StepKind.RECOVERY, down, hill = true))), cd)
+        }
+        return when (phase) {
+            Phase.BASE -> if (i % 2 != 0) null else {
+                val n = pyRound(lerp(6.0, 10.0, t)).toInt()
+                SessionType.HILL_SPRINTS to listOf(wu, Repeat(n, listOf(s(StepKind.INTERVAL, 10.0, hill = true), s(StepKind.RECOVERY, 120.0, hill = true))), cd)
+            }
+            Phase.BUILD -> {
+                val every = when (profile.terrain) { Terrain.FLAT -> 4; Terrain.ROLLING -> 3; Terrain.HILLY -> 2 }
+                if (i % every != 0) null else repeats(pyRound(lerp(60.0, 90.0, t) / 15) * 15, pyRound(lerp(6.0, 10.0, t)).toInt())
+            }
+            Phase.PEAK -> if (profile.terrain == Terrain.HILLY && i % 3 == 0) repeats(90.0, 8) else null
+            else -> null
+        }
+    }
+
+    private fun note(type: SessionType, role: Role, phase: Phase, terrain: Terrain): String = when {
+        type == SessionType.HILL_SPRINTS -> "Find a short, steep hill. Sprint up hard, walk back down and recover fully."
+        type == SessionType.HILL_REPEATS -> "Find a steady hill. Run up at a hard effort, jog back down. Run by effort, not pace."
+        role == Role.LONG && terrain == Terrain.HILLY && (phase == Phase.BUILD || phase == Phase.PEAK) -> "Pick a hilly route if you can."
+        else -> ""
+    }
 
     private fun q1(phase: Phase, t: Double, goal: Goal, taper: Boolean): Pair<SessionType, List<Block>> {
         val wu = Single(s(StepKind.WARMUP, secs = 15 * 60.0, zone = Zone.E))
@@ -158,12 +195,12 @@ object PlanBuilder {
                 var role = roles.getValue(d)
                 if (role == Role.Q2 && (isDown || raceWeek)) role = Role.EASY
                 val (type, blocks) = when (role) {
-                    Role.Q1 -> q1(phase, t, goal, taper)
+                    Role.Q1 -> hillSession(profile, phase, t, i, taper) ?: q1(phase, t, goal, taper)
                     Role.Q2 -> q2(phase, t, goal, taper)
                     Role.LONG -> if (longKm <= 0.5) continue else long(longKm, phase, t, goal, i + 1)
                     Role.EASY -> SessionType.EASY to emptyList()
                 }
-                sessions += Workout(day, i + 1, phase, type, blocks)
+                sessions += Workout(day, i + 1, phase, type, blocks, note(type, role, phase, profile.terrain))
             }
 
             if (raceWeek) {

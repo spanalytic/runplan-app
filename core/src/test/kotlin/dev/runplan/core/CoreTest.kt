@@ -289,4 +289,45 @@ class CoreTest {
         assertEquals(100.0, sm[100], 2.0)
         assertTrue(!Analytics.hasBarometer(pts.map { it.copy(baroAlt = Double.NaN) }))
     }
+
+    // ---- hill sessions -------------------------------------------------------------------
+
+    @Test fun hillsOnlyWhenSwitchedOn() {
+        val hillTypes = setOf(SessionType.HILL_SPRINTS, SessionType.HILL_REPEATS)
+        assertTrue(PlanBuilder.build(profile.copy(terrain = Terrain.HILLY)).workouts.none { it.type in hillTypes })
+    }
+
+    @Test fun hillyPlanMatchesPythonRules() {
+        // same as: runplan.py --goal half --race-date 2027-01-10 --start 2026-10-19 --days Tue,Wed,Fri,Sun --terrain hilly --hills
+        val plan = PlanBuilder.build(profile.copy(terrain = Terrain.HILLY, hills = true))
+        val q1 = plan.workouts.filter { PlanBuilder.weekday(it.epochDay) == 1 }.map { it.type }
+        val S = SessionType.HILL_SPRINTS; val H = SessionType.HILL_REPEATS; val I = SessionType.INTERVALS
+        assertEquals(listOf(S, SessionType.STRIDES, S, I, H, I, H, I, I, H, I, I), q1)
+        val sprints = plan.workouts.first { it.type == S }
+        assertTrue(sprints.note.startsWith("Find a short, steep hill"))
+        assertTrue(Fmt.summary(sprints).contains("× (10 s uphill + 2 min back down)"), Fmt.summary(sprints))
+        assertTrue(plan.workouts.filter { it.phase == Phase.TAPER }.none { it.type == S || it.type == H })
+        assertTrue(plan.workouts.any { it.type == SessionType.LONG && it.note.contains("hilly route") })
+        // rolling: fewer hill repeats than hilly
+        val rolling = PlanBuilder.build(profile.copy(terrain = Terrain.ROLLING, hills = true)).workouts.count { it.type == H }
+        assertTrue(rolling < plan.workouts.count { it.type == H }, "rolling $rolling")
+    }
+
+    @Test fun hillStepsAreCoachedByEffort() {
+        val plan = PlanBuilder.build(profile.copy(terrain = Terrain.HILLY, hills = true))
+        for (type in listOf(SessionType.HILL_SPRINTS, SessionType.HILL_REPEATS)) {
+            val w = plan.workouts.first { it.type == type }
+            val steps = RunStep.flatten(w, plan.paces)
+            val eng = RunEngine("t", steps)
+            // run the hill steps far slower than any pace zone: still no pace alerts
+            val cues = simulate(eng) { if (it.current.hill) 600.0 else it.current.typical.takeIf(Double::isFinite) ?: plan.paces.jog }
+            val spoken = cues.map { it.second.speech() }
+            assertTrue(cues.none { it.second is Cue.PaceAlert })
+            val word = if (type == SessionType.HILL_SPRINTS) "Hill sprint" else "Hill rep"
+            assertTrue(spoken.any { it.startsWith("Go! $word 1 of") && it.contains("hard uphill") }, spoken.joinToString("\n"))
+            assertTrue(spoken.any { it.contains("walk or jog back down") })
+            assertEquals("H", eng.results.first { it.label.startsWith(word) }.zoneCode)
+            assertTrue(eng.results.filter { it.zoneCode == "H" }.all { it.hit == null })
+        }
+    }
 }

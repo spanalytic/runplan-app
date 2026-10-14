@@ -102,7 +102,7 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
             Action("Update my fitness", "Ran a race or time trial? Enter it and every pace in the plan updates.") { updating = true }
-            Action("Edit plan", "Change your goal, race day, run days or weekly distance.", editPlan)
+            Action("Edit plan", "Change your goal, race hills, race day, run days or weekly distance.", editPlan)
         }
 
         Section("Coaching")

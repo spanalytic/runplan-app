@@ -135,6 +135,7 @@ class Step:
     secs: float | None = None
     metres: float | None = None
     zone: str | None = None   # E, M, HM, T, I, R or None (no target)
+    hill: bool = False        # uphill by effort (recovery: back down); no pace target
 
 
 @dataclass
@@ -178,6 +179,8 @@ class Workout:
             amt = (f"{s.metres / 1000:g} km" if s.metres is not None
                    else f"{s.secs / 60:g} min")
             if s.zone is None:
+                if s.hill:
+                    return f"{amt} back down" if s.kind == "recovery" else f"{amt} hard uphill"
                 return f"{amt} jog" if s.kind in ("recovery", "rest") else amt
             f, sl = p.zone(s.zone)
             return f"{amt} @ {s.zone} {fmt_pace(f)}-{fmt_pace(sl)}/km"
@@ -328,6 +331,38 @@ def q1_session(phase: str, t: float, goal: str, taper: bool) -> tuple[str, list]
                                         Step("recovery", secs=rec)]), cd]
 
 
+def hill_session(phase: str, t: float, i: int, taper: bool, terrain: str, hills: bool) -> tuple[str, list] | None:
+    """Hill session replacing the week's Q1, or None. Base: hill sprints every other week in
+    place of strides. Build: hill repeats every 4th/3rd/2nd week (flat/rolling/hilly race).
+    Peak: hilly races keep hill repeats every 3rd week."""
+    if not hills or taper:
+        return None
+    wu, cd = Step("warmup", secs=15 * 60, zone="E"), Step("cooldown", secs=10 * 60, zone="E")
+
+    def repeats(rep: float, n: int):
+        down = max(60, round(rep * 1.5 / 15) * 15)
+        return "HillRepeats", [wu, Repeat(n, [Step("interval", secs=rep, hill=True),
+                                              Step("recovery", secs=down, hill=True)]), cd]
+    if phase == "Base":
+        if i % 2:
+            return None
+        n = round(lerp(6, 10, t))
+        return "HillSprints", [wu, Repeat(n, [Step("interval", secs=10, hill=True),
+                                              Step("recovery", secs=120, hill=True)]), cd]
+    if phase == "Build":
+        every = {"flat": 4, "rolling": 3, "hilly": 2}[terrain]
+        return None if i % every else repeats(round(lerp(60, 90, t) / 15) * 15, round(lerp(6, 10, t)))
+    if phase == "Peak" and terrain == "hilly" and i % 3 == 0:
+        return repeats(90, 8)
+    return None
+
+
+HILL_NOTES = {
+    "HillSprints": "Find a short, steep hill. Sprint up hard, walk back down and recover fully.",
+    "HillRepeats": "Find a steady hill. Run up at a hard effort, jog back down. Run by effort, not pace.",
+}
+
+
 def q2_session(phase: str, t: float, goal: str, taper: bool) -> tuple[str, list]:
     """Threshold / race-specific day."""
     wu, cd = Step("warmup", secs=12 * 60, zone="E"), Step("cooldown", secs=10 * 60, zone="E")
@@ -366,7 +401,8 @@ def long_session(km: float, phase: str, t: float, goal: str, week: int) -> tuple
 
 
 def build_plan(paces: Paces, goal: str, start: date, race_day: date,
-               days: list[str], current_km: float, peak_km: float | None) -> list[Workout]:
+               days: list[str], current_km: float, peak_km: float | None,
+               terrain: str = "flat", hills: bool = False) -> list[Workout]:
     peak_default, long_cap, taper_mults = GOALS[goal]
     n_days = len(days)
     roles = assign_roles(days)
@@ -411,13 +447,17 @@ def build_plan(paces: Paces, goal: str, start: date, race_day: date,
                 role = "Easy"                       # one quality day only in cut-back / race weeks
             w = Workout(day, i + 1, phase, "")
             if role == "Q1":
-                w.session, w.blocks = q1_session(phase, t, goal, taper)
+                w.session, w.blocks = (hill_session(phase, t, i, taper, terrain, hills)
+                                       or q1_session(phase, t, goal, taper))
+                w.note = HILL_NOTES.get(w.session, "")
             elif role == "Q2":
                 w.session, w.blocks = q2_session(phase, t, goal, taper)
             elif role == "Long":
                 if long_km <= 0:
                     continue
                 w.session, w.blocks = long_session(long_km, phase, t, goal, i + 1)
+                if terrain == "hilly" and phase in ("Build", "Peak"):
+                    w.note = "Pick a hilly route if you can."
             else:
                 w.session = "Easy"
             sessions.append(w)
@@ -477,6 +517,8 @@ def main(argv=None) -> None:
     ap.add_argument("--runs-per-week", type=int, default=4, choices=[3, 4, 5, 6])
     ap.add_argument("--current-km", type=float, default=25, help="current weekly km")
     ap.add_argument("--peak-km", type=float, help="override peak weekly km")
+    ap.add_argument("--terrain", default="flat", choices=["flat", "rolling", "hilly"], help="how hilly the race is")
+    ap.add_argument("--hills", action="store_true", help="add hill sprints / hill repeats")
     ap.add_argument("--from-date", type=date.fromisoformat,
                     help="only export sessions on/after this date (use after a recalibration)")
     ap.add_argument("--out", default="plan_out", help="output directory")
@@ -496,7 +538,7 @@ def main(argv=None) -> None:
     if len(days) < 3:
         raise SystemExit("need at least 3 run days")
 
-    plan = build_plan(paces, a.goal, start, race_day, days, a.current_km, a.peak_km)
+    plan = build_plan(paces, a.goal, start, race_day, days, a.current_km, a.peak_km, a.terrain, a.hills)
     if a.from_date:
         plan = [w for w in plan if w.day >= a.from_date]
 

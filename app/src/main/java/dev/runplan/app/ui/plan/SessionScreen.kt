@@ -110,23 +110,29 @@ private fun StepLine(s: Step, p: Paces, indent: Boolean) {
             Modifier.fillMaxWidth().padding(start = if (indent) 16.dp else 0.dp, top = 14.dp, bottom = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(Modifier.size(width = 6.dp, height = 36.dp).clip(RoundedCornerShape(3.dp)).background(Palette.zone(s.zone)))
+            Box(Modifier.size(width = 6.dp, height = 36.dp).clip(RoundedCornerShape(3.dp)).background(Palette.zone(s.shapeZone)))
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 val name = when (s.kind) {
                     StepKind.WARMUP -> "Warm-up"
                     StepKind.COOLDOWN -> "Cool-down"
-                    StepKind.RECOVERY -> "Recovery jog"
-                    StepKind.INTERVAL -> s.zone?.label ?: "Run"
+                    StepKind.RECOVERY -> if (s.hill) "Back down" else "Recovery jog"
+                    StepKind.INTERVAL -> s.zone?.label ?: if (s.hill) "Uphill" else "Run"
                 }
                 Text(name, style = MaterialTheme.typography.titleMedium)
                 Text(Fmt.amount(s), style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
             }
-            s.zone?.let { z ->
+            val z = s.zone
+            if (z != null) {
                 val (f, sl) = p.target(z)
                 Column(horizontalAlignment = Alignment.End) {
                     Text(Fmt.band(f, sl), style = MaterialTheme.typography.headlineSmall)
                     Text("per km", style = MaterialTheme.typography.labelSmall, color = Palette.Slate)
+                }
+            } else if (s.hill && s.kind == StepKind.INTERVAL) {
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Hard", style = MaterialTheme.typography.headlineSmall)
+                    Text("effort", style = MaterialTheme.typography.labelSmall, color = Palette.Slate)
                 }
             }
         }

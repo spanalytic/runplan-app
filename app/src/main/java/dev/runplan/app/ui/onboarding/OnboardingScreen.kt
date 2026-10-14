@@ -38,6 +38,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
@@ -62,11 +63,12 @@ import dev.runplan.core.Fmt
 import dev.runplan.core.Goal
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
+import dev.runplan.core.Terrain
 import dev.runplan.core.Vdot
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
-private const val PAGES = 5
+private const val PAGES = 6
 private const val DAY_MS = 86_400_000L
 private val DAY_LETTERS = listOf("M", "T", "W", "T", "F", "S", "S")
 private val INPUT_DISTANCES = listOf(Distance.MILE, Distance.K3, Distance.K5, Distance.K10, Distance.HALF, Distance.MARATHON)
@@ -84,6 +86,8 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
     var mm by rememberSaveable { mutableStateOf(if (secs > 0) ((secs % 3600) / 60).toString() else "") }
     var ss by rememberSaveable { mutableStateOf(if (secs > 0) (secs % 60).toString().padStart(2, '0') else "") }
     var goal by rememberSaveable { mutableStateOf(existing?.goal ?: Goal.HALF) }
+    var terrain by rememberSaveable { mutableStateOf(existing?.terrain ?: Terrain.FLAT) }
+    var hills by rememberSaveable { mutableStateOf(existing?.hills ?: false) }
     var race by rememberSaveable { mutableStateOf(existing?.raceEpochDay ?: (today + 7 * 12)) }
     var days by rememberSaveable { mutableStateOf(existing?.days ?: listOf(1, 2, 4, 6)) }
     var km by rememberSaveable { mutableFloatStateOf(existing?.currentKm?.toFloat() ?: 25f) }
@@ -97,8 +101,9 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
     val valid = when (page) {
         0 -> vdotOk
         1 -> true
-        2 -> race >= start && weeks >= goal.minWeeks
-        3 -> days.size in 3..6
+        2 -> true
+        3 -> race >= start && weeks >= goal.minWeeks
+        4 -> days.size in 3..6
         else -> true
     }
 
@@ -108,7 +113,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).safeDrawingPadding().imePadding(),
     ) {
-        // header: back + progress through the five questions
+        // header: back + progress through the questions
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (page > 0 || onCancel != null) {
                 IconButton(onClick = ::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -184,6 +189,38 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                 }
 
                 2 -> {
+                    Question("Is your race hilly?", "Hill sessions build strength for climbs, and help on any course.")
+                    Terrain.entries.forEach { tr ->
+                        val selected = tr == terrain
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) Palette.Ink else Color.Transparent)
+                                .clickable { terrain = tr; hills = tr != Terrain.FLAT }
+                                .padding(horizontal = 16.dp, vertical = 18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(tr.label, style = MaterialTheme.typography.headlineSmall, color = if (selected) Color.White else Palette.Ink, modifier = Modifier.weight(1f))
+                            Text(tr.help, style = MaterialTheme.typography.titleMedium, color = if (selected) Color.White.copy(alpha = 0.8f) else Palette.Slate)
+                        }
+                        HorizontalDivider(color = Palette.Line)
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Row(Modifier.fillMaxWidth().clickable { hills = !hills }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Add hill sessions", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Hill sprints in place of some strides early on, then hill repeats in place of " +
+                                    when (terrain) { Terrain.FLAT -> "one in four"; Terrain.ROLLING -> "one in three"; Terrain.HILLY -> "every other" } +
+                                    " interval session" + if (terrain == Terrain.HILLY) "." else "s.",
+                                style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+                            )
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Switch(checked = hills, onCheckedChange = { hills = it })
+                    }
+                }
+
+                3 -> {
                     Question("When's race day?", "A ${goal.label.lowercase()} plan needs at least ${goal.minWeeks} weeks.")
                     val minDay = start + (goal.minWeeks - 1) * 7L
                     val state = rememberDatePickerState(
@@ -209,7 +246,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     )
                 }
 
-                3 -> {
+                4 -> {
                     Question("Which days can you run?", "Pick 3 to 6. Your first day is intervals and your last is the long run.")
                     val roles = PlanBuilder.roleLabels(days)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -255,7 +292,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
         Button(
             onClick = {
                 if (page < PAGES - 1) page++ else onDone(
-                    Profile(distance, timeSec.toDouble(), goal, start, race, days.sorted(), km.roundToInt().toDouble(), existing?.peakKm),
+                    Profile(distance, timeSec.toDouble(), goal, start, race, days.sorted(), km.roundToInt().toDouble(), existing?.peakKm, terrain, hills),
                 )
             },
             enabled = valid,

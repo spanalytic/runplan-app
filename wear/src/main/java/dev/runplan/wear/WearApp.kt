@@ -56,7 +56,7 @@ private fun zoneColor(code: String): Color = when (code) {
     "E" -> Color(0xFF43A86F)
     "M", "HM" -> Color(0xFF3C7DD9)
     "T" -> Color(0xFFD99A1C)
-    "I" -> Color(0xFFE2512E)
+    "I", "H" -> Color(0xFFE2512E)
     "R" -> Color(0xFFA447C9)
     "G" -> Signal
     else -> Color(0xFFC3CAD3)

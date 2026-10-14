@@ -9,6 +9,7 @@ import dev.runplan.core.Plan
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
 import dev.runplan.core.StepResult
+import dev.runplan.core.Terrain
 import dev.runplan.core.TrackPoint
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -193,6 +194,8 @@ class Store(context: Context) {
                     put("days", JSONArray(p.days))
                     put("currentKm", p.currentKm)
                     put("peakKm", p.peakKm ?: JSONObject.NULL)
+                    put("terrain", p.terrain.name)
+                    put("hills", p.hills)
                 })
             }
             put("done", JSONArray(s.done.toList()))
@@ -251,6 +254,8 @@ class Store(context: Context) {
                     days = days,
                     currentKm = p.getDouble("currentKm"),
                     peakKm = if (p.isNull("peakKm")) null else p.getDouble("peakKm"),
+                    terrain = runCatching { Terrain.valueOf(p.optString("terrain", "FLAT")) }.getOrDefault(Terrain.FLAT),
+                    hills = p.optBoolean("hills", false),
                 )
             }
             val done = o.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
