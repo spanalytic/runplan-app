@@ -2,7 +2,8 @@ package dev.runplan.core
 
 import java.time.LocalDate
 
-enum class StepKind { WARMUP, INTERVAL, RECOVERY, COOLDOWN }
+/** [READY] is a short countdown before a rep that you start with a tap (hill sessions). */
+enum class StepKind { WARMUP, INTERVAL, RECOVERY, COOLDOWN, READY }
 
 /**
  * One step. Exactly one of [secs]/[metres] is set, or neither for an open-ended step.
@@ -17,6 +18,12 @@ data class Step(
 ) {
     /** Zone used to colour and size the step in a workout shape: hill efforts show as hard. */
     val shapeZone: Zone? get() = zone ?: if (hill && kind == StepKind.INTERVAL) Zone.I else null
+
+    /** Open (ends with a tap). */
+    val isOpen: Boolean get() = secs == null && metres == null
+
+    /** Duration for estimates: an open hill step (getting to or back down the hill) counts as a minute. */
+    val estSecs: Double? get() = secs ?: if (hill && isOpen) 60.0 else null
 }
 
 /** How hilly the goal race is. Decides how often hill repeats replace interval sessions. */
@@ -85,7 +92,7 @@ data class Workout(
             val pace = s.zone?.let { p.centre(it) } ?: p.jog
             when {
                 s.metres != null -> { km += s.metres / 1000; min += s.metres / 1000 * pace / 60 }
-                s.secs != null -> { min += s.secs / 60; km += s.secs / pace }
+                s.estSecs != null -> { min += s.estSecs!! / 60; km += s.estSecs!! / pace }
             }
         }
         return km to min

@@ -29,13 +29,15 @@ data class RunStep(
     fun describe(): String {
         val amt = when {
             metres != null -> Fmt.distance(metres)
-            secs != null -> Fmt.minutes(secs)
+            secs != null -> if (secs < 120 && secs % 60 != 0.0) "${secs.toLong()} s" else Fmt.minutes(secs)
             else -> "Open"
         }
         return when {
             hasTarget -> "$amt @ ${Fmt.band(fast, slow)}"
+            kind == StepKind.READY -> "$amt countdown"
+            hill && isOpen -> if (label == TO_HILL) "tap Next when you're there" else "tap Next at the bottom"
             hill && kind == StepKind.INTERVAL -> "$amt hard uphill"
-            hill && kind == StepKind.RECOVERY -> "$amt back down"
+            hill && kind == StepKind.RECOVERY -> "$amt rest"
             kind == StepKind.RECOVERY -> "$amt jog"
             else -> amt
         }
@@ -43,6 +45,7 @@ data class RunStep(
 
     companion object {
         const val HILL_CODE = "H"
+        const val TO_HILL = "To the hill"
 
         fun flatten(w: Workout, p: Paces): List<RunStep> {
             val out = ArrayList<RunStep>()
@@ -55,9 +58,10 @@ data class RunStep(
                 StepKind.COOLDOWN -> "Cool-down"
                 StepKind.RECOVERY -> "Recovery"
                 StepKind.INTERVAL -> if (w.type == SessionType.FREE) "Free run" else st.zone?.label ?: "Run"
+                StepKind.READY -> "Get ready"
             }
             for (b in w.blocks) when (b) {
-                is Single -> add(b.step, baseLabel(b.step))
+                is Single -> add(b.step, if (b.step.hill && b.step.isOpen) TO_HILL else baseLabel(b.step))
                 is Repeat -> for (i in 1..b.times) for (st in b.steps) {
                     val lbl = when (st.kind) {
                         StepKind.INTERVAL -> when {
@@ -65,7 +69,11 @@ data class RunStep(
                             w.type == SessionType.HILL_SPRINTS -> "Hill sprint $i of ${b.times}"
                             else -> "Hill rep $i of ${b.times}"
                         }
-                        StepKind.RECOVERY -> "Recovery $i of ${b.times}"
+                        StepKind.RECOVERY -> when {
+                            !st.hill -> "Recovery $i of ${b.times}"
+                            st.isOpen -> "Back down"
+                            else -> "Rest"
+                        }
                         else -> baseLabel(st)
                     }
                     add(st, lbl)
@@ -81,7 +89,11 @@ enum class PaceStatus { NONE, IN_BAND, SLOW, FAST }
 /** Things the phone should say or the watch should buzz for. */
 sealed interface Cue {
     /** A new step begins. [prev] is the step just finished (null at the start of the run). */
-    data class StepStart(val step: RunStep, val index: Int, val count: Int, val next: RunStep?, val prev: StepResult?) : Cue
+    data class StepStart(
+        val step: RunStep, val index: Int, val count: Int, val next: RunStep?, val prev: StepResult?,
+        /** The step before was a [StepKind.READY] countdown that already announced this one. */
+        val afterCountdown: Boolean = false,
+    ) : Cue
     /** "10 seconds" / "200 metres to go", announcing what comes next. */
     data class Countdown(val left: String, val next: RunStep?) : Cue
     data class Remaining(val text: String) : Cue
@@ -103,12 +115,24 @@ sealed interface Cue {
 
     /** Text for text-to-speech. Targets are spoken as the middle of the band. */
     fun speech(): String = when (this) {
-        is StepStart -> buildString {
-            append(if (index == 0) "Let's go." else opener(step)).append(' ')
-            append(step.label).append(": ").append(spokenStep(step)).append('.')
-            prev?.let { append(' ').append(spokenResult(it)) }
+        is StepStart -> when {
+            step.kind == StepKind.READY ->
+                "Get ready." + (next?.let { " ${it.label} in ${spokenDuration(step.secs ?: 10.0)}: ${spokenStep(it)}." } ?: "")
+            afterCountdown -> "Go!"
+            step.hill && step.isOpen && step.label == RunStep.TO_HILL ->
+                "Jog to the bottom of your hill and tap Next when you're there." + (prev?.let { " " + spokenResult(it) } ?: "")
+            step.hill && step.isOpen ->
+                if (next?.kind == StepKind.READY) "Jog back down. Tap Next when you're at the bottom."
+                else "That was the last one. Jog back down and tap Next for the cool-down."
+            step.hill && step.kind == StepKind.RECOVERY -> "Rest." + (prev?.let { " " + spokenResult(it) } ?: "")
+            else -> buildString {
+                append(if (index == 0) "Let's go." else opener(step)).append(' ')
+                append(step.label).append(": ").append(spokenStep(step)).append('.')
+                prev?.let { append(' ').append(spokenResult(it)) }
+            }
         }
-        is Countdown -> left + if (next != null) " Next: ${next.label}, ${spokenStep(next)}." else ""
+        // the 10 s rest at the top of a hill rep needs no announcing
+        is Countdown -> left + if (next != null && !(next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) " Next: ${next.label}, ${spokenStep(next)}." else ""
         is Remaining -> text
         is Halfway -> "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
             (verdict(pace, step.fast, step.slow)?.let { ", $it" } ?: "") + "."
@@ -133,6 +157,7 @@ sealed interface Cue {
             StepKind.WARMUP -> "Let's go."
             StepKind.COOLDOWN -> "Last one."
             StepKind.RECOVERY -> "Recover."
+            StepKind.READY -> "Get ready."
             StepKind.INTERVAL -> if (st.hill || (st.zone != null && st.zone != Zone.E)) "Go!" else "Keep going."
         }
 
@@ -144,8 +169,10 @@ sealed interface Cue {
                 else -> "Run as you like"
             }
             return when {
+                st.hill && st.isOpen -> if (st.label == RunStep.TO_HILL) "jog to the bottom of your hill" else "jog back down"
                 st.hill && st.kind == StepKind.INTERVAL -> "$amt, hard uphill"
-                st.hill && st.kind == StepKind.RECOVERY -> "$amt, walk or jog back down"
+                st.hill && st.kind == StepKind.RECOVERY -> "$amt rest"
+                st.kind == StepKind.READY -> "$amt countdown"
                 st.capOnly -> "$amt, no faster than ${spokenPace(st.fast)} per kilometre"
                 st.hasTarget -> "$amt at ${spokenPace((st.fast + st.slow) / 2)} per kilometre"
                 st.kind == StepKind.RECOVERY -> "$amt easy jog"
@@ -358,12 +385,14 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             splits += sec
             lastSplitMs = elapsedMs
             val st = current
-            val longStep = (st.metres ?: 0.0) >= 2000 || (st.secs ?: 0.0) >= 480 || st.isOpen
+            val longStep = (st.metres ?: 0.0) >= 2000 || (st.secs ?: 0.0) >= 480 || (st.isOpen && !st.hill)
             if (longStep) cues += Cue.Split(nextSplitKm, sec)
             nextSplitKm++
         }
 
         val rem = remaining()
+        // countdown to a tap-started rep: "3", "2", "1", then the rep starts with "Go!"
+        if (current.kind == StepKind.READY) for (n in 3 downTo 1) if (rem <= n && rem > 0 && said.add("r$n")) cues += Cue.Remaining("$n")
         if (rem.isFinite() && rem <= 0) {
             cues += advance()
             return cues
@@ -425,7 +454,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             listOf(finishedCue(done))
         } else {
             index++
-            listOf(Cue.StepStart(current, index, steps.size, steps.getOrNull(index + 1), done))
+            listOf(Cue.StepStart(current, index, steps.size, steps.getOrNull(index + 1), done, afterCountdown = steps[index - 1].kind == StepKind.READY))
         }
     }
 

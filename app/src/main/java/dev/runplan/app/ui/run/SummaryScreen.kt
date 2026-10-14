@@ -176,7 +176,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
             Text("Steps", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.height(8.dp))
             HorizontalDivider(color = Palette.Line)
-            r.steps.forEach { s ->
+            r.steps.filter { it.label != "Get ready" }.forEach { s ->   // countdowns before tap-started reps
                 Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(width = 6.dp, height = 32.dp).clip(RoundedCornerShape(3.dp)).background(Palette.zone(s.zoneCode)))
                     Spacer(Modifier.width(12.dp))

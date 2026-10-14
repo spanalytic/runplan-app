@@ -305,7 +305,6 @@ class CoreTest {
         assertEquals(listOf(S, SessionType.STRIDES, S, I, H, I, H, I, I, H, I, I), q1)
         val sprints = plan.workouts.first { it.type == S }
         assertTrue(sprints.note.startsWith("Find a short, steep hill"))
-        assertTrue(Fmt.summary(sprints).contains("× (10 s uphill + 2 min back down)"), Fmt.summary(sprints))
         assertTrue(plan.workouts.filter { it.phase == Phase.TAPER }.none { it.type == S || it.type == H })
         assertTrue(plan.workouts.any { it.type == SessionType.LONG && it.note.contains("hilly route") })
         // rolling: fewer hill repeats than hilly
@@ -317,17 +316,44 @@ class CoreTest {
         val plan = PlanBuilder.build(profile.copy(terrain = Terrain.HILLY, hills = true))
         for (type in listOf(SessionType.HILL_SPRINTS, SessionType.HILL_REPEATS)) {
             val w = plan.workouts.first { it.type == type }
-            val steps = RunStep.flatten(w, plan.paces)
-            val eng = RunEngine("t", steps)
-            // run the hill steps far slower than any pace zone: still no pace alerts
-            val cues = simulate(eng) { if (it.current.hill) 600.0 else it.current.typical.takeIf(Double::isFinite) ?: plan.paces.jog }
-            val spoken = cues.map { it.second.speech() }
-            assertTrue(cues.none { it.second is Cue.PaceAlert })
-            val word = if (type == SessionType.HILL_SPRINTS) "Hill sprint" else "Hill rep"
-            assertTrue(spoken.any { it.startsWith("Go! $word 1 of") && it.contains("hard uphill") }, spoken.joinToString("\n"))
-            assertTrue(spoken.any { it.contains("walk or jog back down") })
+            val sprints = type == SessionType.HILL_SPRINTS
+            val reps = (w.blocks.single { it is Repeat } as Repeat).times
+            val eng = RunEngine("t", RunStep.flatten(w, plan.paces))
+            val word = if (sprints) "Hill sprint" else "Hill rep"
+            assertEquals(listOf("Warm-up", RunStep.TO_HILL, "Get ready", "$word 1 of $reps", "Rest", "Back down", "Get ready"), eng.steps.take(7).map { it.label })
+            assertTrue(eng.steps[1].isOpen && eng.steps[5].isOpen)
+
+            // run it, tapping Next 40 s into each open step; hill steps far slower than any pace zone
+            val spoken = ArrayList<String>()
+            val cues = ArrayList<Cue>()
+            eng.start().forEach { cues += it }
+            var t = 0L; var d = 0.0; var openSince = -1L
+            while (!eng.finished && t < 3_600_000) {
+                t += 1000
+                val p = if (eng.current.hill) 600.0 else eng.current.typical.takeIf(Double::isFinite) ?: plan.paces.jog
+                d += 1000 / p
+                cues += eng.update(t, d, p)
+                if (eng.current.isOpen) { if (openSince < 0) openSince = t; if (t - openSince >= 40_000) { cues += eng.advance(); openSince = -1 } }
+            }
+            cues.forEach { spoken += it.speech() }
+            val all = spoken.joinToString("\n")
+            assertTrue(eng.finished, all)
+            assertTrue(cues.none { it is Cue.PaceAlert })
+            assertTrue(spoken.any { it.startsWith("Jog to the bottom of your hill and tap Next when you're there. Last lap:") }, all)
+            val ready = spoken.indexOfFirst { it.startsWith("Get ready. $word 1 of $reps in 10 seconds:") && it.contains("hard uphill") }
+            assertTrue(ready >= 0, all)
+            assertEquals(listOf("3", "2", "1", "Go!"), spoken.subList(ready + 1, ready + 5), all)
+            val rest = spoken.indexOfFirst { it.startsWith("Rest. Last lap:") }
+            assertTrue(rest > ready + 4 && spoken.subList(ready + 5, rest).all { it == "10 seconds left." }, all)
+            assertEquals("Jog back down. Tap Next when you're at the bottom.", spoken[rest + 1])
+            assertTrue(spoken.any { it == "10 seconds left. Next: To the hill, jog to the bottom of your hill." }, all)
+            assertTrue(spoken.none { it.contains("Next: Rest") || it.contains("Run as you like") }, all)
+            assertEquals(1, spoken.count { it.startsWith("That was the last one.") }, all)
             assertEquals("H", eng.results.first { it.label.startsWith(word) }.zoneCode)
             assertTrue(eng.results.filter { it.zoneCode == "H" }.all { it.hit == null })
         }
+        // reads as a short summary, without the countdowns
+        val sp = plan.workouts.first { it.type == SessionType.HILL_SPRINTS }
+        assertTrue(Fmt.summary(sp).startsWith("10 min easy, jog to the hill, 6 × (10 s uphill + 10 s rest + jog down), 10 min easy"), Fmt.summary(sp))
     }
 }

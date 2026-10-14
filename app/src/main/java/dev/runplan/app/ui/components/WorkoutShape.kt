@@ -23,13 +23,13 @@ data class Bar(val weight: Float, val zone: Zone?)
 
 fun bars(w: Workout, p: Paces): List<Bar> = w.flatSteps().map { s ->
     val pace = s.zone?.let { p.centre(it) } ?: p.jog
-    val sec = s.secs ?: s.metres?.let { it / 1000 * pace } ?: 600.0
+    val sec = s.estSecs ?: s.metres?.let { it / 1000 * pace } ?: 600.0
     Bar(sec.toFloat(), s.shapeZone)
 }
 
 fun bars(steps: List<RunStep>, p: Paces?): List<Bar> = steps.map { s ->
     val pace = s.typical.takeIf { it.isFinite() } ?: p?.jog ?: 400.0
-    val sec = s.secs ?: s.metres?.let { it / 1000 * pace } ?: 600.0
+    val sec = s.secs ?: s.metres?.let { it / 1000 * pace } ?: if (s.hill) 60.0 else 600.0
     Bar(sec.toFloat(), s.shapeZone)
 }
 

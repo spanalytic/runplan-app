@@ -81,7 +81,7 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
                     is Single -> StepLine(b.step, p, indent = false)
                     is Repeat -> {
                         Text("Repeat ${b.times} times", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
-                        b.steps.forEach { StepLine(it, p, indent = true) }
+                        b.steps.filter { it.kind != StepKind.READY }.forEach { StepLine(it, p, indent = true) }
                         HorizontalDivider(color = Palette.Line)
                     }
                 }
@@ -116,11 +116,20 @@ private fun StepLine(s: Step, p: Paces, indent: Boolean) {
                 val name = when (s.kind) {
                     StepKind.WARMUP -> "Warm-up"
                     StepKind.COOLDOWN -> "Cool-down"
-                    StepKind.RECOVERY -> if (s.hill) "Back down" else "Recovery jog"
+                    StepKind.RECOVERY -> when {
+                        !s.hill -> "Recovery jog"
+                        s.isOpen && !indent -> "Jog to the hill"
+                        s.isOpen -> "Jog back down"
+                        else -> "Rest at the top"
+                    }
+                    StepKind.READY -> "Get ready"
                     StepKind.INTERVAL -> s.zone?.label ?: if (s.hill) "Uphill" else "Run"
                 }
                 Text(name, style = MaterialTheme.typography.titleMedium)
-                Text(Fmt.amount(s), style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                Text(
+                    if (s.hill && s.isOpen) (if (indent) "Tap Next at the bottom" else "Tap Next when you're there") else Fmt.amount(s),
+                    style = MaterialTheme.typography.bodySmall, color = Palette.Slate,
+                )
             }
             val z = s.zone
             if (z != null) {

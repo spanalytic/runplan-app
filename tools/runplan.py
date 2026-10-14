@@ -166,21 +166,24 @@ class Workout:
         km = mins = 0.0
         for s in self._flat():
             pace = p.centre(s.zone) if s.zone else p.easy[1] + 20  # jog
+            secs = s.secs if s.secs is not None else (60 if s.hill and s.metres is None else None)
             if s.metres is not None:
                 km += s.metres / 1000
                 mins += s.metres / 1000 * pace / 60
-            elif s.secs is not None:
-                mins += s.secs / 60
-                km += s.secs / pace
+            elif secs is not None:
+                mins += secs / 60
+                km += secs / pace
         return km, mins
 
     def describe(self, p: Paces) -> str:
         def one(s: Step) -> str:
             amt = (f"{s.metres / 1000:g} km" if s.metres is not None
-                   else f"{s.secs / 60:g} min")
+                   else f"{s.secs / 60:g} min" if s.secs is not None else "lap button")
             if s.zone is None:
                 if s.hill:
-                    return f"{amt} back down" if s.kind == "recovery" else f"{amt} hard uphill"
+                    if s.secs is None:
+                        return "jog to/down the hill (lap button)"
+                    return {"interval": f"{s.secs:g}s hard uphill", "rest": f"{s.secs:g}s countdown"}.get(s.kind, f"{s.secs:g}s rest")
                 return f"{amt} jog" if s.kind in ("recovery", "rest") else amt
             f, sl = p.zone(s.zone)
             return f"{amt} @ {s.zone} {fmt_pace(f)}-{fmt_pace(sl)}/km"
@@ -337,18 +340,22 @@ def hill_session(phase: str, t: float, i: int, taper: bool, terrain: str, hills:
     Peak: hilly races keep hill repeats every 3rd week."""
     if not hills or taper:
         return None
-    wu, cd = Step("warmup", secs=15 * 60, zone="E"), Step("cooldown", secs=10 * 60, zone="E")
+
+    # 10 min easy, jog to the hill (lap button at the bottom), then each rep: 10 s countdown,
+    # hard uphill, 10 s rest at the top, jog back down (lap button at the bottom), cool-down
+    def session(name: str, rep: float, n: int):
+        return name, [Step("warmup", secs=10 * 60, zone="E"),
+                      Step("recovery", hill=True),
+                      Repeat(n, [Step("rest", secs=10, hill=True),
+                                 Step("interval", secs=rep, hill=True),
+                                 Step("recovery", secs=10, hill=True),
+                                 Step("recovery", hill=True)]),
+                      Step("cooldown", secs=10 * 60, zone="E")]
 
     def repeats(rep: float, n: int):
-        down = max(60, round(rep * 1.5 / 15) * 15)
-        return "HillRepeats", [wu, Repeat(n, [Step("interval", secs=rep, hill=True),
-                                              Step("recovery", secs=down, hill=True)]), cd]
+        return session("HillRepeats", rep, n)
     if phase == "Base":
-        if i % 2:
-            return None
-        n = round(lerp(6, 10, t))
-        return "HillSprints", [wu, Repeat(n, [Step("interval", secs=10, hill=True),
-                                              Step("recovery", secs=120, hill=True)]), cd]
+        return None if i % 2 else session("HillSprints", 10, round(lerp(6, 10, t)))
     if phase == "Build":
         every = {"flat": 4, "rolling": 3, "hilly": 2}[terrain]
         return None if i % every else repeats(round(lerp(60, 90, t) / 15) * 15, round(lerp(6, 10, t)))
@@ -358,8 +365,8 @@ def hill_session(phase: str, t: float, i: int, taper: bool, terrain: str, hills:
 
 
 HILL_NOTES = {
-    "HillSprints": "Find a short, steep hill. Sprint up hard, walk back down and recover fully.",
-    "HillRepeats": "Find a steady hill. Run up at a hard effort, jog back down. Run by effort, not pace.",
+    "HillSprints": "Find a short, steep hill. Sprint up hard, then walk or jog back down and press lap at the bottom.",
+    "HillRepeats": "Find a steady hill. Run up at a hard effort, jog back down and press lap at the bottom. Run by effort, not pace.",
 }
 
 

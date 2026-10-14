@@ -161,7 +161,10 @@ private fun Active(s: RunState, ink: Color, send: (String) -> Unit) {
             Spacer(Modifier.width(10.dp))
             Button(
                 onClick = { send(WearPaths.CMD_SKIP) },
-                colors = ButtonDefaults.buttonColors(backgroundColor = ink.copy(alpha = 0.18f), contentColor = ink),
+                // open step (jog to / back down the hill): Next is the main action, so make it stand out
+                colors = if (!s.stepRemaining.isFinite() && s.nextLabel.isNotEmpty())
+                    ButtonDefaults.buttonColors(backgroundColor = Signal, contentColor = Color.White)
+                else ButtonDefaults.buttonColors(backgroundColor = ink.copy(alpha = 0.18f), contentColor = ink),
                 modifier = Modifier.size(ButtonDefaults.SmallButtonSize),
             ) { Text(">|", style = style(16, FontWeight.Bold)) }
         }
