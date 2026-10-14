@@ -40,6 +40,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.runplan.app.ui.components.rememberToday
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.run.RunPhase
 import dev.runplan.app.run.RunSession
@@ -67,7 +68,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
     val runActive = session.phase in setOf(RunPhase.READY, RunPhase.RUNNING, RunPhase.PAUSED)
     val plan by RunPlanApp.store.plan.collectAsStateWithLifecycle()
     val state by RunPlanApp.store.state.collectAsStateWithLifecycle()
-    val today = remember { LocalDate.now().toEpochDay() }
+    val today = rememberToday()
     val p = plan
     if (p == null) {
         Box(modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {

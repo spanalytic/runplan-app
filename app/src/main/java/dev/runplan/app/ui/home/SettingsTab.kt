@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.runplan.app.ui.components.rememberToday
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.BugReport
 import dev.runplan.app.data.Updater
@@ -67,7 +68,7 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
             Section("Your paces")
             val goalM = profile.goal.distance.metres
             val goalName = profile.goal.label.let { if (it.endsWith("K")) it else it.lowercase() }
-            val today = remember { java.time.LocalDate.now().toEpochDay() }
+            val today = rememberToday()
             val weeksLeft = ((profile.raceEpochDay - today) / 7).toInt()
             val (lo, hi) = Vdot.projected(p.vdot, weeksLeft)
             Text(

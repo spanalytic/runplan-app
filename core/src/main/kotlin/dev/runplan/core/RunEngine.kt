@@ -312,8 +312,9 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     var finished = false; private set
     private var stepStartMs = 0L
     private var stepStartM = 0.0
-    private var elapsedMs = 0L
-    private var distanceM = 0.0
+    /** Active time and distance at the last update; frozen once [finished], so they match the spoken summary. */
+    var elapsedMs = 0L; private set
+    var distanceM = 0.0; private set
     private var pace = Double.NaN
     private var outSinceMs = -1L
     private var lastAlertMs = -1_000_000L

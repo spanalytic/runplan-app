@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.runplan.app.ui.components.rememberToday
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.Exports
 import dev.runplan.app.data.RunRecord
@@ -65,7 +66,7 @@ fun ProgressTab(modifier: Modifier, openRun: (String) -> Unit) {
     val ctx = LocalContext.current
     val state by RunPlanApp.store.state.collectAsStateWithLifecycle()
     val plan by RunPlanApp.store.plan.collectAsStateWithLifecycle()
-    val today = remember { LocalDate.now().toEpochDay() }
+    val today = rememberToday()
     val runs = state.runs
 
     Column(modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {

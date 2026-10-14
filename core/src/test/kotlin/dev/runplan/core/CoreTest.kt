@@ -415,4 +415,24 @@ class CoreTest {
         assertEquals(plan, Moves.apply(plan, mapOf(tue.id to wed.epochDay)))
         assertEquals(plan, Moves.apply(plan, mapOf(tue.id to monday + 14, "d0" to monday)))
     }
+
+    @Test fun finishedEngineFreezesTimeAndDistance() {
+        // the service keeps ticking for a moment after "Workout complete"; nothing it sends may count
+        val eng = RunEngine("Easy run", RunStep.flatten(easyRun(1000.0), easyPaces))
+        val fin = simulate(eng) { 431.0 }.last().second as Cue.Finished
+        val (ms, m) = eng.elapsedMs to eng.distanceM
+        assertEquals(fin.sec, ms / 1000.0)
+        assertEquals(fin.distanceM, m)
+        assertTrue(eng.update(ms + 4000, m + 10, 431.0).isEmpty())
+        assertEquals(ms, eng.elapsedMs)
+        assertEquals(m, eng.distanceM)
+        assertEquals(fin.sec, eng.state(paused = false, gpsOk = true).elapsedSec)
+    }
+
+    @Test fun runCrossingMidnightIsFiledUnderItsStartDay() {
+        val london = java.time.ZoneId.of("Europe/London")
+        val start = java.time.ZonedDateTime.of(2026, 10, 14, 23, 50, 0, 0, london).toInstant().toEpochMilli()
+        assertEquals(day("2026-10-14"), Dates.epochDay(start, london))
+        assertEquals(day("2026-10-15"), Dates.epochDay(start + 20 * 60_000, london))
+    }
 }

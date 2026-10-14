@@ -1,5 +1,7 @@
 package dev.runplan.core
 
+import java.time.Instant
+import java.time.ZoneId
 import kotlin.math.roundToLong
 
 object Fmt {
@@ -72,4 +74,10 @@ object Fmt {
             else -> ""
         }
     }
+}
+
+object Dates {
+    /** The local calendar day (epoch day) a wall-clock time falls on: a run is filed under the day it started. */
+    fun epochDay(wallMs: Long, zone: ZoneId = ZoneId.systemDefault()): Long =
+        Instant.ofEpochMilli(wallMs).atZone(zone).toLocalDate().toEpochDay()
 }

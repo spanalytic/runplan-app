@@ -30,6 +30,7 @@ import dev.runplan.app.R
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.RunRecord
 import dev.runplan.core.Cue
+import dev.runplan.core.Dates
 import dev.runplan.core.Fmt
 import dev.runplan.core.Odometer
 import dev.runplan.core.RunEngine
@@ -269,7 +270,10 @@ class RunService : LifecycleService() {
             }
             if (c is Cue.Finished) {
                 buzz(longArrayOf(0, 400))
-                lifecycleScope.launch { delay(4000); finish(save = true) }
+                // stop counting now: the saved run must match the summary just spoken
+                odo.pause()
+                runCatching { locationManager?.removeUpdates(locationListener) }
+                lifecycleScope.launch { finish(save = true) }
             }
         }
     }
@@ -294,7 +298,8 @@ class RunService : LifecycleService() {
     /** The run as it stands, without ending it. */
     private fun record(e: RunEngine, sec: Double, steps: List<StepResult>) = RunRecord(
         id = startWallMs.toString(),
-        epochDay = LocalDate.now().toEpochDay(),
+        // filed under the day it started, even if it ran past midnight
+        epochDay = Dates.epochDay(startWallMs),
         workoutId = workoutId,
         title = e.title,
         startMs = startWallMs,
@@ -329,12 +334,14 @@ class RunService : LifecycleService() {
         if (phase == RunPhase.RUNNING) activeAccumMs += SystemClock.elapsedRealtime() - resumedAtMs
         var savedId: String? = null
         if (save && e != null && phase != RunPhase.READY) {
-            // ended from the Finish button: say the same wrap-up as a completed workout
-            // (empty when the engine already finished on its own and spoke it)
-            val wrapUp = e.finish()
+            // ended from the Finish button: catch the engine up to now and say the same wrap-up
+            // as a completed workout (nothing when the engine already finished on its own: it
+            // spoke it then, and its time and distance stay frozen at that moment)
+            val caughtUp = e.update(activeAccumMs, odo.distanceM, Double.NaN).filterIsInstance<Cue.Finished>()
+            val wrapUp = caughtUp + e.finish()
             if (store.state.value.settings.voice) wrapUp.forEach { speaker.speak(it.speech()) }
             val (efforts, ascent) = store.analyse(odo.points)
-            val r = record(e, activeAccumMs / 1000.0, e.results.toList()).copy(efforts = efforts, ascentM = ascent)
+            val r = record(e, e.elapsedMs / 1000.0, e.results.toList()).copy(metres = e.distanceM, efforts = efforts, ascentM = ascent)
             store.addRun(r, odo.points.toList())
             store.clearCheckpoint()
             savedId = r.id
