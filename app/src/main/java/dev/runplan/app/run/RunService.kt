@@ -30,6 +30,7 @@ import dev.runplan.app.R
 import dev.runplan.app.RunPlanApp
 import dev.runplan.app.data.RunRecord
 import dev.runplan.core.Cue
+import dev.runplan.core.CustomWorkout
 import dev.runplan.core.Dates
 import dev.runplan.core.Fmt
 import dev.runplan.core.Odometer
@@ -150,12 +151,14 @@ class RunService : LifecycleService() {
         }
         val plan = store.plan.value
         val today = LocalDate.now().toEpochDay()
-        val workout: Workout = id?.let { plan?.find(it) } ?: Workout.free(today)
+        val custom = CustomWorkout.fromId(id)
+        val workout: Workout = custom?.toWorkout(today) ?: id?.let { plan?.find(it) } ?: Workout.free(today)
         val paces = plan?.paces ?: store.state.value.profile?.paces
         val steps = if (paces != null) RunStep.flatten(workout, paces)
             else listOf(RunStep("Free run", StepKind.INTERVAL, null, null, null, Double.NaN, Double.NaN))
-        engine = RunEngine(workout.type.label, steps)
-        workoutId = if (workout.type == SessionType.FREE) null else workout.id
+        engine = RunEngine(custom?.title?.replaceFirstChar { it.uppercase() } ?: workout.type.label, steps)
+        // a free run or a workout you built yourself doesn't tick off a planned session
+        workoutId = if (workout.type == SessionType.FREE || workout.type == SessionType.CUSTOM) null else workout.id
         phase = RunPhase.READY
         odo.pause()   // keep listening for a fix, but don't count distance until START
 

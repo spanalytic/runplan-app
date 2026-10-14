@@ -110,7 +110,7 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
                 onClick = { startRun(w.id) },
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.weight(1f).height(52.dp),
-            ) { Text("Start run") }
+            ) { Text("Start this workout") }
         }
     }
     val pl = plan

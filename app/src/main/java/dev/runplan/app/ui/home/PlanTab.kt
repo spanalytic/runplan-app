@@ -21,11 +21,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,7 +64,7 @@ private val longDate = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.UK)
 private val dow = DateTimeFormatter.ofPattern("EEE", Locale.UK)
 
 @Composable
-fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String) -> Unit, startRun: (String?) -> Unit, resumeRun: () -> Unit) {
+fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String) -> Unit, startRun: (String?) -> Unit, buildWorkout: () -> Unit, resumeRun: () -> Unit) {
     val session by RunSession.view.collectAsStateWithLifecycle()
     val runActive = session.phase in setOf(RunPhase.READY, RunPhase.RUNNING, RunPhase.PAUSED)
     val plan by RunPlanApp.store.plan.collectAsStateWithLifecycle()
@@ -122,7 +122,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
             }
         }
         item {
-            TodayBlock(p, today, state.done, p.on(today)?.let(ran), open, startRun)
+            TodayBlock(p, today, state.done, p.on(today)?.let(ran), open, startRun, buildWorkout)
         }
         for (week in currentWeek..p.weeks) {
             val ws = byWeek[week] ?: continue
@@ -148,8 +148,24 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
 }
 
 @Composable
-private fun TodayBlock(p: Plan, today: Long, done: Set<String>, run: RunRecord?, openSession: (String) -> Unit, startRun: (String?) -> Unit) {
+private fun TodayBlock(p: Plan, today: Long, done: Set<String>, run: RunRecord?, openSession: (String) -> Unit, startRun: (String?) -> Unit, buildWorkout: () -> Unit) {
     val w = p.on(today)
+    // on a planned day, starting asks: today's session, or one you build yourself?
+    var choosing by remember { mutableStateOf(false) }
+    if (choosing && w != null) {
+        AlertDialog(
+            onDismissRequest = { choosing = false },
+            title = { Text("Start a workout") },
+            text = {
+                Text(
+                    "Your plan has a ${w.type.label.lowercase()} today: ${Fmt.summary(w)}. Do that, or build your own?",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = { TextButton(onClick = { choosing = false; startRun(w.id) }) { Text("Planned workout") } },
+            dismissButton = { TextButton(onClick = { choosing = false; buildWorkout() }) { Text("Build my own") } },
+        )
+    }
     Column(
         Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface).padding(20.dp),
@@ -163,7 +179,13 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, run: RunRecord?,
                 style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
             )
             Spacer(Modifier.height(16.dp))
-            OutlinedButton(onClick = { startRun(null) }, shape = RoundedCornerShape(12.dp)) { Text("Go for a free run") }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Button(onClick = buildWorkout, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).height(52.dp)) {
+                    Text("Build a workout")
+                }
+                Spacer(Modifier.width(8.dp))
+                TextButton(onClick = { startRun(null) }) { Text("Free run") }
+            }
             return@Column
         }
         val isDone = w.id in done
@@ -188,9 +210,10 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, run: RunRecord?,
                 Spacer(Modifier.width(6.dp))
                 Text("Done", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { openSession(w.id) }) { Text("View run") }
+                TextButton(onClick = buildWorkout) { Text("Build a workout") }
             } else {
-                Button(onClick = { startRun(w.id) }, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).height(52.dp)) {
-                    Text("Start run")
+                Button(onClick = { choosing = true }, shape = RoundedCornerShape(12.dp), modifier = Modifier.weight(1f).height(52.dp)) {
+                    Text("Start workout")
                 }
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { openSession(w.id) }) { Text("Details") }

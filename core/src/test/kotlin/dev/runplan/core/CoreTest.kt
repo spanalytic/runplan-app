@@ -492,4 +492,44 @@ class CoreTest {
         // done without a run: taken from the current plan
         assertEquals(now.find(q1.id), Kept.recover(edited, emptyMap(), setOf(q1.id), emptyMap())[q1.id])
     }
+
+    @Test fun builtWorkoutRoundTripsAndCoaches() {
+        val c = CustomWorkout(
+            warmup = Amount.minutes(10), reps = 6, work = Amount.metres(400), zone = Zone.R,
+            recovery = Amount(90.0, false), cooldown = null,
+        )
+        assertEquals(c, CustomWorkout.fromId(c.id))
+        assertEquals("6 × 400 m fast", c.title)
+        val w = c.toWorkout(day("2026-10-14"))
+        assertEquals(SessionType.CUSTOM, w.type)
+        assertEquals("10 min easy, 6 × (400 m fast + 90 s jog)", Fmt.summary(w))
+        val steps = RunStep.flatten(w, easyPaces)
+        assertEquals(13, steps.size)
+        assertEquals("Rep 6 of 6", steps[11].label)
+        assertEquals(easyPaces.target(Zone.R).first, steps[1].fast)
+
+        // one rep is a continuous run; no pace target and no warm-up or cool-down is allowed
+        val plain = CustomWorkout(warmup = null, reps = 1, work = Amount.metres(5000), zone = null, cooldown = null)
+        assertEquals(plain, CustomWorkout.fromId(plain.id))
+        assertEquals("5 km run", plain.title)
+        assertEquals(listOf("Run"), RunStep.flatten(plain.toWorkout(0), easyPaces).map { it.label })
+
+        // plan ids and damaged ids aren't custom workouts
+        assertEquals(null, CustomWorkout.fromId("d20000"))
+        assertEquals(null, CustomWorkout.fromId("custom:r=x"))
+        assertEquals(null, CustomWorkout.fromId(null))
+    }
+
+    @Test fun builderSteppersMoveThroughTheChoices() {
+        assertEquals(Amount.metres(800), Amount.metres(600).nudge(1))
+        assertEquals(Amount.metres(500), Amount.metres(600).nudge(-1))
+        assertEquals(Amount.metres(100), Amount.metres(100).nudge(-1))
+        assertEquals(Amount(10.0, false), Amount(10.0, false).nudge(-1))
+        // a value between choices moves to the neighbour in that direction
+        assertEquals(Amount.metres(800), Amount.metres(700).nudge(1))
+        assertEquals(Amount.metres(600), Amount.metres(700).nudge(-1))
+        // switching 10 min at 6:00/km gives about the same distance, and back
+        assertEquals(Amount.metres(1600), Amount.minutes(10).toggle(360.0))
+        assertEquals(Amount.minutes(10), Amount.metres(1600).toggle(360.0))
+    }
 }

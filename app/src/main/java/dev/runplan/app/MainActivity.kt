@@ -31,6 +31,7 @@ import dev.runplan.app.run.RunService
 import dev.runplan.app.run.RunSession
 import dev.runplan.app.ui.home.HomeScreen
 import dev.runplan.app.ui.onboarding.OnboardingScreen
+import dev.runplan.app.ui.plan.BuildScreen
 import dev.runplan.app.ui.plan.SessionScreen
 import dev.runplan.app.ui.run.MapScreen
 import dev.runplan.app.ui.run.RunScreen
@@ -64,6 +65,7 @@ object Routes {
     const val SESSION = "session/{id}"
     fun session(id: String) = "session/$id"
     const val RUN = "run"
+    const val BUILD = "build"
     const val SUMMARY = "summary/{id}"
     fun summary(id: String) = "summary/$id"
     const val MAP = "map/{id}"
@@ -110,6 +112,7 @@ private fun AppRoot(openRunSignal: Int) {
                 openSession = { nav.navigate(Routes.session(it)) },
                 openRun = { nav.navigate(Routes.summary(it)) },
                 startRun = startRun,
+                buildWorkout = { nav.navigate(Routes.BUILD) },
                 resumeRun = { nav.navigate(Routes.RUN) },
                 editPlan = { nav.navigate(Routes.onboarding(true)) },
                 newPlan = {
@@ -124,6 +127,9 @@ private fun AppRoot(openRunSignal: Int) {
                 onBack = { nav.popBackStack() },
                 startRun = startRun,
             )
+        }
+        composable(Routes.BUILD) {
+            BuildScreen(onBack = { nav.popBackStack() }, startRun = startRun)
         }
         composable(Routes.RUN) {
             RunScreen(

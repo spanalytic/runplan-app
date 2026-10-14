@@ -63,6 +63,8 @@ enum class SessionType(val label: String, val quality: Boolean) {
     EASY("Easy run", false),
     RACE("Race day", true),
     FREE("Free run", false),
+    /** Built by the runner (see [CustomWorkout]); not part of the plan. */
+    CUSTOM("Your own workout", false),
 }
 
 data class Workout(
