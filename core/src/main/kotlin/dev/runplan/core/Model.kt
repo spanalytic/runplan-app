@@ -72,8 +72,11 @@ data class Workout(
     val type: SessionType,
     val blocks: List<Block>,
     val note: String = "",
+    /** The day the plan put it on. Stays put when the session is moved, so the id (and done flags) stay the same. */
+    val planDay: Long = epochDay,
 ) {
-    val id: String get() = "d$epochDay"
+    val id: String get() = "d$planDay"
+    val moved: Boolean get() = epochDay != planDay
     val date: LocalDate get() = LocalDate.ofEpochDay(epochDay)
 
     /** Steps with repeats expanded. */

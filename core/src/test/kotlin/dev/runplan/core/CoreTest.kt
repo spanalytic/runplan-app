@@ -356,4 +356,44 @@ class CoreTest {
         val sp = plan.workouts.first { it.type == SessionType.HILL_SPRINTS }
         assertTrue(Fmt.summary(sp).startsWith("10 min easy, jog to the hill, 6 × (10 s uphill + 10 s rest + jog down), 10 min easy"), Fmt.summary(sp))
     }
+
+    @Test fun movingSessionsWithinTheWeek() {
+        val plan = PlanBuilder.build(profile)
+        val week = plan.byWeek().getValue(2)
+        val tue = week.first { PlanBuilder.weekday(it.epochDay) == 1 }
+        val wed = week.first { PlanBuilder.weekday(it.epochDay) == 2 }
+        val monday = PlanBuilder.mondayOf(tue.epochDay)
+
+        // onto a rest day: the id stays the same so done flags and runs still match
+        var moves = Moves.move(plan, emptyMap(), tue, monday)
+        var moved = Moves.apply(plan, moves)
+        assertEquals(tue.id, moved.on(monday)?.id)
+        assertTrue(moved.on(monday)!!.moved)
+        assertEquals(null, moved.on(tue.epochDay))
+        assertEquals(moved.workouts.sortedBy { it.epochDay }, moved.workouts)
+        assertEquals(plan.workouts.size, moved.workouts.size)
+
+        // onto a day with a session: the two swap
+        moves = Moves.move(moved, moves, moved.find(tue.id)!!, wed.epochDay)
+        moved = Moves.apply(plan, moves)
+        assertEquals(tue.id, moved.on(wed.epochDay)?.id)
+        assertEquals(wed.id, moved.on(monday)?.id)
+
+        // back to where the plan put them: no moves left
+        moves = Moves.move(moved, moves, moved.find(tue.id)!!, tue.epochDay)
+        moves = Moves.move(Moves.apply(plan, moves), moves, Moves.apply(plan, moves).find(wed.id)!!, wed.epochDay)
+        assertEquals(emptyMap<String, Long>(), moves)
+        assertEquals(plan, Moves.apply(plan, moves))
+
+        // only the same week, never the race day, and the race itself stays put
+        assertEquals((monday until monday + 7).toList(), Moves.choices(plan, tue))
+        assertEquals(moves, Moves.move(plan, moves, tue, monday + 7))
+        val race = plan.workouts.last()
+        assertTrue(Moves.choices(plan, race).isEmpty())
+        assertTrue(Moves.choices(plan, plan.byWeek().getValue(plan.weeks).first()).all { it < profile.raceEpochDay })
+
+        // stale or clashing moves are ignored rather than doubling up a day
+        assertEquals(plan, Moves.apply(plan, mapOf(tue.id to wed.epochDay)))
+        assertEquals(plan, Moves.apply(plan, mapOf(tue.id to monday + 14, "d0" to monday)))
+    }
 }

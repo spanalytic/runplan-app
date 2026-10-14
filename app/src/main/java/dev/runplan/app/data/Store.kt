@@ -5,12 +5,14 @@ import dev.runplan.core.Analytics
 import dev.runplan.core.Distance
 import dev.runplan.core.Effort
 import dev.runplan.core.Goal
+import dev.runplan.core.Moves
 import dev.runplan.core.Plan
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
 import dev.runplan.core.StepResult
 import dev.runplan.core.Terrain
 import dev.runplan.core.TrackPoint
+import dev.runplan.core.Workout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,11 +52,13 @@ data class AppState(
     val runs: List<RunRecord> = emptyList(),
     /** Bumped when the derived numbers (best efforts, climb) are calculated differently. */
     val analyticsVersion: Int = 0,
+    /** Sessions moved to another day of their week: workout id -> day. */
+    val moves: Map<String, Long> = emptyMap(),
 )
 
 /**
  * Single JSON file of app state plus one CSV per GPS track.
- * The plan itself is never stored: it is rebuilt from the profile.
+ * The plan itself is never stored: it is rebuilt from the profile, with any moved sessions laid on top.
  */
 class Store(context: Context) {
     private val dir = context.filesDir
@@ -64,7 +68,8 @@ class Store(context: Context) {
     private val _state = MutableStateFlow(load())
     val state: StateFlow<AppState> = _state.asStateFlow()
 
-    private val _plan = MutableStateFlow(buildPlan(_state.value.profile))
+    private var basePlan: Plan? = buildPlan(_state.value.profile)
+    private val _plan = MutableStateFlow(basePlan?.let { Moves.apply(it, _state.value.moves) })
     val plan: StateFlow<Plan?> = _plan.asStateFlow()
 
     private fun buildPlan(p: Profile?): Plan? = p?.let { runCatching { PlanBuilder.build(it) }.getOrNull() }
@@ -74,12 +79,18 @@ class Store(context: Context) {
         val old = _state.value
         val new = f(old)
         _state.value = new
-        if (new.profile != old.profile) _plan.value = buildPlan(new.profile)
+        if (new.profile != old.profile) basePlan = buildPlan(new.profile)
+        if (new.profile != old.profile || new.moves != old.moves) _plan.value = basePlan?.let { Moves.apply(it, new.moves) }
         save(new)
     }
 
     fun setProfile(p: Profile?) = update { it.copy(profile = p) }
     fun setDone(id: String, done: Boolean) = update { it.copy(done = if (done) it.done + id else it.done - id) }
+    /** Puts [w] on [day] (same week); a session already there swaps onto [w]'s day. */
+    fun moveSession(w: Workout, day: Long) = update { st ->
+        val shown = _plan.value ?: return@update st
+        st.copy(moves = Moves.move(shown, st.moves, w, day))
+    }
     fun setSettings(s: Settings) = update { it.copy(settings = s) }
     /** Derived numbers for a track: best efforts and climb. */
     fun analyse(points: List<TrackPoint>): Pair<List<Effort>, Double> =
@@ -131,7 +142,7 @@ class Store(context: Context) {
         }
     }
 
-    fun resetPlan() = update { it.copy(profile = null, done = emptySet()) }
+    fun resetPlan() = update { it.copy(profile = null, done = emptySet(), moves = emptyMap()) }
 
     // ---- tracks ---------------------------------------------------------------------------
 
@@ -200,6 +211,7 @@ class Store(context: Context) {
             }
             put("done", JSONArray(s.done.toList()))
             put("analyticsVersion", s.analyticsVersion)
+            put("moves", JSONObject().apply { s.moves.forEach { (id, day) -> put(id, day) } })
             put("settings", JSONObject().apply {
                 put("voice", s.settings.voice)
                 put("paceAlerts", s.settings.paceAlerts)
@@ -295,7 +307,8 @@ class Store(context: Context) {
                     )
                 }
             } ?: emptyList()
-            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0))
+            val moves = o.optJSONObject("moves")?.let { m -> m.keys().asSequence().associateWith { m.getLong(it) } } ?: emptyMap()
+            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0), moves)
         }
     }
 }

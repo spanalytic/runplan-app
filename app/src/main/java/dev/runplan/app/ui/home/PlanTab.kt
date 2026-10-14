@@ -1,7 +1,9 @@
 package dev.runplan.app.ui.home
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,8 +45,11 @@ import dev.runplan.app.run.RunPhase
 import dev.runplan.app.run.RunSession
 import dev.runplan.app.ui.components.WorkoutShape
 import dev.runplan.app.ui.components.bars
+import dev.runplan.app.ui.plan.MoveDialog
+import dev.runplan.app.ui.plan.movedNote
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Fmt
+import dev.runplan.core.Moves
 import dev.runplan.core.Vdot
 import dev.runplan.core.Plan
 import dev.runplan.core.Workout
@@ -78,6 +83,9 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
     val open: (String) -> Unit = { id -> runFor[id]?.let(openRun) ?: openSession(id) }
     val currentWeek = remember(p, today) { p.workouts.firstOrNull { it.epochDay >= today }?.week ?: p.weeks }
     var showEarlier by remember { mutableStateOf(false) }
+    // long-press a session to move it to another day of its week
+    var moving by remember { mutableStateOf<String?>(null) }
+    val movable: (Workout) -> Boolean = { w -> w.id !in state.done && Moves.choices(p, w).size > 1 }
 
     LazyColumn(modifier.fillMaxSize().statusBarsPadding(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
         if (runActive) item {
@@ -115,7 +123,9 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
         for (week in currentWeek..p.weeks) {
             val ws = byWeek[week] ?: continue
             item(key = "h$week") { WeekHeader(p, week, ws) }
-            items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, w.epochDay == today) { open(w.id) } }
+            items(ws, key = { it.id }) { w ->
+                SessionRow(p, w, w.id in state.done, w.epochDay == today, onLongClick = { moving = w.id }.takeIf { movable(w) }) { open(w.id) }
+            }
         }
         if (currentWeek > 1) {
             item {
@@ -130,6 +140,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
             }
         }
     }
+    moving?.let { id -> p.find(id)?.let { w -> MoveDialog(p, w, state.done) { moving = null } } }
 }
 
 @Composable
@@ -210,10 +221,11 @@ private fun WeekHeader(p: Plan, week: Int, ws: List<Workout>) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onClick: () -> Unit) {
+private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick)
+        Modifier.fillMaxWidth().combinedClickable(onLongClick = onLongClick, onClick = onClick)
             .background(if (isToday) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.background)
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -225,6 +237,7 @@ private fun SessionRow(p: Plan, w: Workout, done: Boolean, isToday: Boolean, onC
         Column(Modifier.weight(1f).padding(horizontal = 12.dp).alpha(if (done) 0.55f else 1f)) {
             Text(w.type.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
             Text(Fmt.summary(w), style = MaterialTheme.typography.bodySmall, color = Palette.Slate, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (w.moved) Text(movedNote(w), style = MaterialTheme.typography.labelSmall, color = Palette.Slate, maxLines = 1)
         }
         Column(Modifier.width(72.dp), horizontalAlignment = Alignment.End) {
             if (done) {

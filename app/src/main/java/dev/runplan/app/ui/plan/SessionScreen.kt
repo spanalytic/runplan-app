@@ -26,8 +26,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,6 +42,7 @@ import dev.runplan.app.ui.components.WorkoutShape
 import dev.runplan.app.ui.components.bars
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Fmt
+import dev.runplan.core.Moves
 import dev.runplan.core.Paces
 import dev.runplan.core.Repeat
 import dev.runplan.core.Single
@@ -55,6 +60,7 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
     val state by RunPlanApp.store.state.collectAsStateWithLifecycle()
     val w = plan?.find(id)
     val p = plan?.paces
+    var moving by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()) {
         IconButton(onClick = onBack, modifier = Modifier.padding(4.dp)) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
         if (w == null || p == null) {
@@ -66,6 +72,12 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
             Text("${w.date.format(date)}, week ${w.week}, ${w.phase.label.lowercase()}", style = MaterialTheme.typography.titleSmall, color = Palette.Slate)
             Text(w.type.label, style = MaterialTheme.typography.displayMedium)
+            if (w.moved) Text(movedNote(w), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
+            if (!done && Moves.choices(plan!!, w).size > 1) {
+                TextButton(onClick = { moving = true }, contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)) {
+                    Text("Move to another day")
+                }
+            }
             if (w.note.isNotEmpty()) {
                 Spacer(Modifier.height(4.dp))
                 Text(w.note, style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
@@ -101,6 +113,8 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
             ) { Text("Start run") }
         }
     }
+    val pl = plan
+    if (moving && pl != null && w != null) MoveDialog(pl, w, state.done) { moving = false }
 }
 
 @Composable
