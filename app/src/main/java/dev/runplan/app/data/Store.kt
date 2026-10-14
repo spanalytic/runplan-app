@@ -47,6 +47,8 @@ data class AppState(
     val done: Set<String> = emptySet(),
     val settings: Settings = Settings(),
     val runs: List<RunRecord> = emptyList(),
+    /** Bumped when the derived numbers (best efforts, climb) are calculated differently. */
+    val analyticsVersion: Int = 0,
 )
 
 /**
@@ -82,13 +84,23 @@ class Store(context: Context) {
     fun analyse(points: List<TrackPoint>): Pair<List<Effort>, Double> =
         Analytics.bestEfforts(points) to Analytics.ascent(points)
 
-    /** Fills in best efforts / climb for runs saved before analytics existed. Call off the main thread. */
+    /**
+     * Fills in best efforts / climb for runs saved before analytics existed, and recalculates
+     * every run's climb once after the method changes. Call off the main thread.
+     */
     fun backfillAnalytics() {
-        val missing = _state.value.runs.filter { it.efforts == null }
+        val redo = _state.value.analyticsVersion < ANALYTICS_VERSION
+        val missing = _state.value.runs.filter { it.efforts == null || redo }
         if (missing.isEmpty()) return
-        val done = missing.associate { r -> r.id to analyse(readTrack(r.id)) }
+        val done = missing.associate { r ->
+            val pts = readTrack(r.id)
+            r.id to ((r.efforts ?: Analytics.bestEfforts(pts)) to if (pts.isEmpty()) r.ascentM else Analytics.ascent(pts))
+        }
         update { st ->
-            st.copy(runs = st.runs.map { r -> done[r.id]?.let { (e, a) -> r.copy(efforts = e, ascentM = a) } ?: r })
+            st.copy(
+                runs = st.runs.map { r -> done[r.id]?.let { (e, a) -> r.copy(efforts = e, ascentM = a) } ?: r },
+                analyticsVersion = ANALYTICS_VERSION,
+            )
         }
     }
 
@@ -124,9 +136,9 @@ class Store(context: Context) {
 
     private fun writeTrack(id: String, points: List<TrackPoint>) {
         File(tracks, "$id.csv").bufferedWriter().use { w ->
-            w.write("t_ms,lat,lon,alt,acc,speed,speed_acc,dist,f_lat,f_lon,f_speed\n")
+            w.write("t_ms,lat,lon,alt,acc,speed,speed_acc,dist,f_lat,f_lon,f_speed,baro_alt\n")
             points.forEach {
-                w.write("${it.tMs},${it.lat},${it.lon},${it.alt},${it.acc},${it.speed},${it.speedAcc},${it.dist},${it.fLat},${it.fLon},${it.fSpeed}\n")
+                w.write("${it.tMs},${it.lat},${it.lon},${it.alt},${it.acc},${it.speed},${it.speedAcc},${it.dist},${it.fLat},${it.fLon},${it.fSpeed},${it.baroAlt}\n")
             }
         }
     }
@@ -144,6 +156,7 @@ class Store(context: Context) {
                     c.getOrNull(5)?.toFloatOrNull() ?: Float.NaN, c.getOrNull(6)?.toFloatOrNull() ?: Float.NaN,
                     c.getOrNull(7)?.toDoubleOrNull() ?: Double.NaN, c.getOrNull(8)?.toDoubleOrNull() ?: Double.NaN,
                     c.getOrNull(9)?.toDoubleOrNull() ?: Double.NaN, c.getOrNull(10)?.toDoubleOrNull() ?: Double.NaN,
+                    c.getOrNull(11)?.toDoubleOrNull() ?: Double.NaN,
                 )
             }.getOrNull()
         }
@@ -162,6 +175,9 @@ class Store(context: Context) {
     }.getOrElse { AppState() }
 
     companion object {
+        /** 1: climb from distance-smoothed altitude, barometer when recorded (was GPS, 15 s smoothing, 2 m step). */
+        const val ANALYTICS_VERSION = 1
+
         /** org.json rejects NaN, so non-finite numbers are stored as null. */
         private fun num(d: Double): Any = if (d.isFinite()) d else JSONObject.NULL
         private fun JSONObject.dbl(k: String): Double = if (isNull(k)) Double.NaN else getDouble(k)
@@ -180,6 +196,7 @@ class Store(context: Context) {
                 })
             }
             put("done", JSONArray(s.done.toList()))
+            put("analyticsVersion", s.analyticsVersion)
             put("settings", JSONObject().apply {
                 put("voice", s.settings.voice)
                 put("paceAlerts", s.settings.paceAlerts)
@@ -273,7 +290,7 @@ class Store(context: Context) {
                     )
                 }
             } ?: emptyList()
-            return AppState(profile, done, settings, runs)
+            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0))
         }
     }
 }

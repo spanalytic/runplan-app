@@ -75,23 +75,80 @@ object Analytics {
     fun fitness(efforts: List<Effort>): Effort? =
         efforts.filter { it.metres >= MIN_VDOT_DISTANCE }.maxByOrNull { it.vdot }
 
-    /** Total climb with a 2 m hysteresis so GPS altitude noise doesn't add up. */
+    /**
+     * Total climb.
+     *
+     * With a barometer the altitude is steady to well under a metre, so a light 50 m average and
+     * a 2 m step are enough. Phone GPS altitude is much worse: whole metres, about ±1.5 m of
+     * jitter and several metres of slow drift. The old 15-second average with a 2 m step counted
+     * that jitter as climb (54 m on a route with about half that). GPS altitude is now averaged
+     * over 150 m of distance and a rise only counts once it clears 4 m from the last low point.
+     */
     fun ascent(points: List<TrackPoint>): Double {
-        val alts = smooth(points.map { it.alt }.filter { it.isFinite() && it != 0.0 }, 7)
+        val src = altitudes(points)
+        val alts = smoothByDistance(points, src.values, if (src.baro) BARO_WINDOW_M else GPS_WINDOW_M).filter { it.isFinite() }
         if (alts.size < 2) return 0.0
+        val step = if (src.baro) BARO_STEP_M else GPS_STEP_M
+        // ref is the last turning point; a rise only counts once it clears the step, but then
+        // counts in full up to its top (a plain step count would drop the last metres of every hill)
         var up = 0.0
         var ref = alts.first()
+        var climbing = false
         for (a in alts) {
-            if (a - ref >= 2.0) { up += a - ref; ref = a }
-            else if (ref - a >= 2.0) ref = a
+            if (climbing) {
+                if (a > ref) { up += a - ref; ref = a } else if (ref - a >= step) { climbing = false; ref = a }
+            } else {
+                if (a < ref) ref = a else if (a - ref >= step) { climbing = true; up += a - ref; ref = a }
+            }
         }
         return up
     }
 
-    private fun smooth(xs: List<Double>, half: Int): List<Double> = xs.indices.map { i ->
-        val lo = max(0, i - half); val hi = min(xs.size - 1, i + half)
-        (lo..hi).sumOf { xs[it] } / (hi - lo + 1)
+    /** Smoothed altitude per point (NaN where unknown), as used for climb; for the elevation chart. */
+    fun smoothedAltitude(points: List<TrackPoint>): DoubleArray {
+        val src = altitudes(points)
+        return smoothByDistance(points, src.values, if (src.baro) BARO_WINDOW_M else GPS_WINDOW_M)
     }
+
+    /** Whether this track has barometric altitude (and climb uses it). */
+    fun hasBarometer(points: List<TrackPoint>): Boolean = altitudes(points).baro
+
+    private class Altitudes(val values: DoubleArray, val baro: Boolean)
+
+    /**
+     * Barometric altitude when most points have it, shifted to sit on the GPS altitude (the
+     * barometer is relative: weather moves its absolute value); GPS altitude otherwise.
+     */
+    private fun altitudes(points: List<TrackPoint>): Altitudes {
+        val gps = DoubleArray(points.size) { val a = points[it].alt; if (a.isFinite() && a != 0.0) a else Double.NaN }
+        if (points.isEmpty() || points.count { it.baroAlt.isFinite() } < points.size * 0.8) return Altitudes(gps, false)
+        val diffs = points.indices.filter { gps[it].isFinite() && points[it].baroAlt.isFinite() }.map { gps[it] - points[it].baroAlt }.sorted()
+        val offset = if (diffs.isEmpty()) 0.0 else diffs[diffs.size / 2]
+        return Altitudes(DoubleArray(points.size) { points[it].baroAlt + offset }, true)
+    }
+
+    /** Average of [values] over [window] metres of distance centred on each point; NaN stays NaN. */
+    private fun smoothByDistance(points: List<TrackPoint>, values: DoubleArray, window: Double): DoubleArray {
+        val out = DoubleArray(points.size) { Double.NaN }
+        val (_, d) = profile(points)
+        val idx = points.indices.filter { values[it].isFinite() }
+        if (idx.isEmpty()) return out
+        var lo = 0
+        var hi = 0           // window is idx[lo until hi]
+        var sum = 0.0
+        for (k in idx.indices) {
+            val c = d[idx[k]]
+            while (hi < idx.size && d[idx[hi]] <= c + window / 2) { sum += values[idx[hi]]; hi++ }
+            while (d[idx[lo]] < c - window / 2) { sum -= values[idx[lo]]; lo++ }
+            out[idx[k]] = sum / (hi - lo)
+        }
+        return out
+    }
+
+    const val GPS_WINDOW_M = 150.0
+    const val GPS_STEP_M = 4.0
+    const val BARO_WINDOW_M = 50.0
+    const val BARO_STEP_M = 2.0
 
     /** (seconds, pace s/km) every point, from the smoothed speed; NaN pace where stopped. */
     fun paceSeries(points: List<TrackPoint>, maxPoints: Int = 400): List<Pair<Double, Double>> {
@@ -109,9 +166,9 @@ object Analytics {
     fun elevationSeries(points: List<TrackPoint>, maxPoints: Int = 300): List<Pair<Double, Double>> {
         val (_, d) = profile(points)
         if (d.size < 2) return emptyList()
-        val alts = smooth(points.map { it.alt }, 7)
+        val alts = smoothedAltitude(points)
         val step = max(1, points.size / maxPoints)
-        val idx = points.indices.step(step).filter { points[it].alt != 0.0 }
+        val idx = points.indices.step(step).filter { alts[it].isFinite() }
         if (idx.isEmpty()) return emptyList()
         val start = alts[idx.first()]
         return idx.map { d[it] / 1000 to alts[it] - start }

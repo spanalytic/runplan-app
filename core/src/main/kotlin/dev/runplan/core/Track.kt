@@ -28,7 +28,8 @@ object Geo {
  * One location fix. [speed] is the receiver's own ground speed in m/s (GNSS Doppler on most phones),
  * NaN when the fix has none; [speedAcc] is its 1-sigma accuracy in m/s, NaN when unknown.
  * The odometer fills in [dist] (cumulative metres), [fLat]/[fLon] (filtered position) and
- * [fSpeed] (smoothed speed, m/s) when it records the point.
+ * [fSpeed] (smoothed speed, m/s) when it records the point. [baroAlt] is altitude from the phone's
+ * barometer (standard atmosphere, so offset by the weather but steady over a run), NaN without one.
  */
 data class TrackPoint(
     val tMs: Long,
@@ -42,6 +43,7 @@ data class TrackPoint(
     val fLat: Double = Double.NaN,
     val fLon: Double = Double.NaN,
     val fSpeed: Double = Double.NaN,
+    val baroAlt: Double = Double.NaN,
 ) {
     /** Filtered position when available, raw otherwise. */
     val bestLat: Double get() = if (fLat.isFinite()) fLat else lat

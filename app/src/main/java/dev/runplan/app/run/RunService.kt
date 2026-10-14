@@ -8,6 +8,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
@@ -64,6 +68,18 @@ class RunService : LifecycleService() {
     private var countdown = 0
     private var wakeLock: PowerManager.WakeLock? = null
     private var locationManager: LocationManager? = null
+    private var sensorManager: SensorManager? = null
+
+    /** Barometric pressure (hPa), lightly smoothed; NaN on phones without a barometer. Climb uses it. */
+    @Volatile private var pressureHpa = Float.NaN
+    private val pressureListener = object : SensorEventListener {
+        override fun onSensorChanged(e: SensorEvent) {
+            val v = e.values.firstOrNull() ?: return
+            val p = pressureHpa
+            pressureHpa = if (p.isNaN()) v else p + 0.3f * (v - p)
+        }
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     private val locationListener = LocationListener { loc: Location ->
         odo.add(
@@ -76,6 +92,9 @@ class RunService : LifecycleService() {
                 // GNSS Doppler speed: far steadier than speed derived from positions
                 speed = if (loc.hasSpeed()) loc.speed else Float.NaN,
                 speedAcc = if (loc.hasSpeedAccuracy()) loc.speedAccuracyMetersPerSecond else Float.NaN,
+                baroAlt = pressureHpa.let { p ->
+                    if (p.isFinite()) SensorManager.getAltitude(SensorManager.PRESSURE_STANDARD_ATMOSPHERE, p).toDouble() else Double.NaN
+                },
             ),
         )
     }
@@ -130,6 +149,9 @@ class RunService : LifecycleService() {
         ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Getting GPS", "Tap to open"), ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RunPlan:run").apply { acquire(6 * 60 * 60 * 1000L) }
+        sensorManager = getSystemService(SensorManager::class.java)?.also { sm ->
+            sm.getDefaultSensor(Sensor.TYPE_PRESSURE)?.let { sm.registerListener(pressureListener, it, 1_000_000) }
+        }
         locationManager = getSystemService(LocationManager::class.java).also {
             it.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, locationListener, Looper.getMainLooper())
         }
@@ -297,6 +319,7 @@ class RunService : LifecycleService() {
         countdownJob = null
         ticker?.cancel()
         runCatching { locationManager?.removeUpdates(locationListener) }
+        runCatching { sensorManager?.unregisterListener(pressureListener) }
         runCatching { wakeLock?.takeIf { it.isHeld }?.release() }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()

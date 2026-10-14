@@ -245,4 +245,48 @@ class CoreTest {
         eng.start(); eng.update(600_000, 1400.0, 430.0)
         assertTrue(eng.finish().single().speech().startsWith("Workout complete, good job. Workout summary: 1.4 kilometres in 10 minutes"))
     }
+
+    @Test fun climbIgnoresGpsAltitudeJitter() {
+        // 5 km at 7:00/km: a 20 m hill up and down in the middle, otherwise flat; GPS altitude
+        // reported in whole metres with ±1.5 m jitter and slow drift, like a phone recording
+        val rnd = java.util.Random(3)
+        val mLon = 111_195.0 * kotlin.math.cos(Math.toRadians(53.3))
+        val v = 1000 / 420.0
+        val pts = ArrayList<TrackPoint>()
+        var x = 0.0
+        for (i in 0..2100) {
+            val hill = when {
+                x in 2000.0..2500.0 -> (x - 2000) / 500 * 20
+                x in 2500.0..3000.0 -> (3000 - x) / 500 * 20
+                else -> 0.0
+            }
+            val drift = 2.0 * kotlin.math.sin(i / 300.0)
+            val alt = Math.round(100 + hill + drift + 1.5 * rnd.nextGaussian()).toDouble()
+            pts += TrackPoint(i * 1000L, 53.3, -1.14 + x / mLon, alt, 4f, v.toFloat(), 0.3f, dist = x)
+            x += v
+        }
+        val up = Analytics.ascent(pts)
+        assertTrue(up in 18.0..28.0, "climb $up m")
+        // and no hill at all: next to nothing
+        val flat = pts.map { it.copy(alt = Math.round(100 + 2.0 * kotlin.math.sin(it.tMs / 300_000.0) + 1.5 * rnd.nextGaussian()).toDouble()) }
+        assertTrue(Analytics.ascent(flat) < 6.0, "flat climb ${Analytics.ascent(flat)} m")
+    }
+
+    @Test fun climbUsesBarometerWhenRecorded() {
+        // same 20 m hill; barometer altitude is steady but offset 40 m by the weather, GPS is noisy
+        val rnd = java.util.Random(5)
+        val v = 1000 / 420.0
+        val pts = (0..2100).map { i ->
+            val x = i * v
+            val hill = when { x in 2000.0..2500.0 -> (x - 2000) / 500 * 20; x in 2500.0..3000.0 -> (3000 - x) / 500 * 20; else -> 0.0 }
+            TrackPoint(i * 1000L, 53.3, -1.14, Math.round(100 + hill + 4 * rnd.nextGaussian()).toDouble(), 4f, dist = x,
+                baroAlt = 60 + hill + 0.25 * rnd.nextGaussian())
+        }
+        assertTrue(Analytics.hasBarometer(pts))
+        assertEquals(20.0, Analytics.ascent(pts), 2.0)
+        // chart sits on the GPS altitude, not the weather-shifted barometer
+        val sm = Analytics.smoothedAltitude(pts)
+        assertEquals(100.0, sm[100], 2.0)
+        assertTrue(!Analytics.hasBarometer(pts.map { it.copy(baroAlt = Double.NaN) }))
+    }
 }

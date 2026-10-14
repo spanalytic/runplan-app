@@ -144,6 +144,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                 )
             }
             val elev = remember(track) { Analytics.elevationSeries(track) }
+            val baro = remember(track) { Analytics.hasBarometer(track) }
             val elevRange = elev.maxOfOrNull { it.second }?.minus(elev.minOf { it.second }) ?: 0.0
             if (elev.size > 10 && elevRange > 1) {
                 fun signed(m: Double) = when {
@@ -154,7 +155,8 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                 Spacer(Modifier.height(28.dp))
                 Text("Elevation", style = MaterialTheme.typography.headlineSmall)
                 Text(
-                    "Height compared with your start" + if (r.ascentM.isFinite()) ", ${r.ascentM.toInt()} m of climb in total" else "",
+                    "Height compared with your start" + (if (r.ascentM.isFinite()) ", ${Math.round(r.ascentM)} m of climb in total" else "") +
+                        if (baro) " (barometer)" else " (GPS)",
                     style = MaterialTheme.typography.bodySmall, color = Palette.Slate,
                 )
                 Spacer(Modifier.height(4.dp))
