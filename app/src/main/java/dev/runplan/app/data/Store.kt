@@ -8,6 +8,7 @@ import dev.runplan.core.Fmt
 import dev.runplan.core.Goal
 import dev.runplan.core.Kept
 import dev.runplan.core.Moves
+import dev.runplan.core.Level
 import dev.runplan.core.Plan
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
@@ -341,6 +342,7 @@ class Store(context: Context) {
                     put("peakKm", p.peakKm ?: JSONObject.NULL)
                     put("terrain", p.terrain.name)
                     put("hills", p.hills)
+                    put("level", p.level.name)
                 })
             }
             put("done", JSONArray(s.done.toList()))
@@ -403,6 +405,7 @@ class Store(context: Context) {
                     peakKm = if (p.isNull("peakKm")) null else p.getDouble("peakKm"),
                     terrain = runCatching { Terrain.valueOf(p.optString("terrain", "FLAT")) }.getOrDefault(Terrain.FLAT),
                     hills = p.optBoolean("hills", false),
+                    level = runCatching { Level.valueOf(p.optString("level", "INTERMEDIATE")) }.getOrDefault(Level.INTERMEDIATE),
                 )
             }
             val done = o.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
@@ -433,6 +436,7 @@ class Store(context: Context) {
                 put("metres", s.metres ?: JSONObject.NULL)
                 put("zone", s.zone?.name ?: JSONObject.NULL)
                 put("hill", s.hill)
+                put("walk", s.walk)
             }
             put("blocks", JSONArray().apply {
                 w.blocks.forEach { b ->
@@ -451,6 +455,7 @@ class Store(context: Context) {
                 metres = if (s.isNull("metres")) null else s.getDouble("metres"),
                 zone = if (s.isNull("zone")) null else Zone.valueOf(s.getString("zone")),
                 hill = s.optBoolean("hill", false),
+                walk = s.optBoolean("walk", false),
             )
             val blocks = o.getJSONArray("blocks").let { a ->
                 (0 until a.length()).map { i ->

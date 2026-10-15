@@ -532,4 +532,95 @@ class CoreTest {
         assertEquals(Amount.metres(1600), Amount.minutes(10).toggle(360.0))
         assertEquals(Amount.minutes(10), Amount.metres(1600).toggle(360.0))
     }
+
+    private val beginner = Profile(
+        recentDistance = StartRunning.NOMINAL_DISTANCE, recentSec = StartRunning.NOMINAL_SEC, goal = Goal.K5,
+        startEpochDay = day("2026-10-21"), raceEpochDay = 0, days = listOf(0, 2, 5), currentKm = 0.0,
+        level = Level.BEGINNER,
+    )
+
+    @Test fun beginnerPlanBuildsToThirtyMinutes() {
+        // same dates as: runplan.py --beginner --start 2026-10-21 --days mon,wed,sat
+        val plan = PlanBuilder.build(beginner)
+        val ws = plan.workouts
+        assertEquals(27, ws.size)
+        // starts on the start day (a Wednesday) and keeps to the chosen days, no session skipped
+        assertEquals(day("2026-10-21"), ws.first().epochDay)
+        assertTrue(ws.all { PlanBuilder.weekday(it.epochDay) in listOf(0, 2, 5) })
+        assertEquals(day("2026-12-21"), ws.last().epochDay)
+        // ends on the Sunday of the last week, stored as its race day; weeks are calendar weeks
+        assertEquals(day("2026-12-27"), plan.profile.raceEpochDay)
+        assertEquals(10, plan.weeks)
+        assertEquals(10, ws.last().week)
+        assertTrue(ws.all { it.phase == Phase.START && it.type != SessionType.RACE })
+        // first session: walk, 8 x (1 min run, 90 s walk), walk
+        assertEquals("5 min walk, 8 × (1 min run + 90 s walk), 5 min walk", Fmt.summary(ws[0]))
+        assertEquals(SessionType.RUN_WALK, ws[0].type)
+        // continuous running from week 5, run 3; the last session is 30 minutes non-stop
+        assertEquals(SessionType.NON_STOP, ws[14].type)
+        assertEquals("5 min walk, 20 min run, 5 min walk", Fmt.summary(ws[14]))
+        assertEquals("5 min walk, 30 min run, 5 min walk", Fmt.summary(ws.last()))
+        // running time never goes down by much from one week to the next
+        val runMin = ws.map { w -> w.flatSteps().filter { !it.walk && it.kind == StepKind.INTERVAL }.sumOf { it.secs!! } / 60 }
+        val weekly = runMin.chunked(3).map { it.sum() }
+        assertTrue(weekly.zipWithNext().all { (a, b) -> b >= a }, weekly.toString())
+        // no pace targets anywhere, walks counted at walking pace
+        assertTrue(ws.all { w -> w.flatSteps().all { it.zone == null } })
+        val (km, min) = ws[0].estimate(plan.paces)
+        assertEquals(30.0, min, 0.01)
+        assertTrue(km in 2.5..4.0, "$km")
+    }
+
+    @Test fun beginnerPlanNeedsThreeDays() {
+        assertFailsWith<PlanException> { PlanBuilder.build(beginner.copy(days = listOf(0, 2, 4, 6))) }
+        assertEquals(day("2026-12-27"), StartRunning.endDay(beginner.startEpochDay, beginner.days))
+    }
+
+    @Test fun beginnerSessionsMoveWithinTheirWeekIncludingTheLastSunday() {
+        val plan = PlanBuilder.build(beginner.copy(days = listOf(1, 3, 5)))
+        val last = plan.workouts.last()
+        assertTrue(plan.profile.raceEpochDay in Moves.choices(plan, last))
+        val moved = Moves.apply(plan, Moves.move(plan, emptyMap(), last, plan.profile.raceEpochDay))
+        assertEquals(plan.profile.raceEpochDay, moved.workouts.last().epochDay)
+        // a done session on that Sunday is kept
+        val kept = Kept.apply(plan, listOf(last.copy(epochDay = plan.profile.raceEpochDay, planDay = plan.profile.raceEpochDay)))
+        assertTrue(kept.workouts.any { it.epochDay == plan.profile.raceEpochDay })
+    }
+
+    @Test fun beginnerCoachingIsPlainRunAndWalk() {
+        val plan = PlanBuilder.build(beginner)
+        val steps = RunStep.flatten(plan.workouts[0], plan.paces)
+        assertEquals(listOf("Warm-up walk", "Run 1 of 8", "Walk", "Run 2 of 8"), steps.take(4).map { it.label })
+        assertEquals("Cool-down walk", steps.last().label)
+        assertTrue(steps.none { it.hasTarget })
+        assertEquals("W", steps[0].zoneCode)
+        assertEquals("", steps[1].zoneCode)
+        assertEquals("90 s walk", steps[2].describe())
+        val cues = simulate(RunEngine("Run and walk", steps)) { if (it.current.walk) 600.0 else 450.0 }
+        val spoken = cues.map { it.second.speech() }
+        val all = spoken.joinToString("\n")
+        assertEquals("Let's go. Start by walking briskly for 5 minutes.", spoken.first())
+        assertTrue("Run for 1 minute, nice and easy." in spoken, all)
+        assertTrue("Walk for 1 minute 30 seconds." in spoken, all)
+        assertTrue("Run for 1 minute, nice and easy. Last one!" in spoken, all)
+        assertTrue("That's all the running done. Walk for 1 minute 30 seconds." in spoken, all)
+        assertTrue("Cool down by walking for 5 minutes." in spoken, all)
+        assertTrue("10 seconds left. Then run for 1 minute." in spoken, all)
+        assertTrue("10 seconds left. Then walk." in spoken, all)
+        // no paces, lap results or pace alerts for beginners
+        assertTrue(spoken.none { it.contains("per kilometre") && !it.startsWith("Workout complete") }, all)
+        assertTrue(spoken.none { it.contains("Last lap") }, all)
+        assertTrue(cues.none { it.second is Cue.PaceAlert })
+        val fin = spoken.last()
+        assertTrue(fin.startsWith("Workout complete, good job. Workout summary:"), fin)
+        assertTrue(!fin.contains("on target"), fin)
+
+        // a non-stop run says when it's halfway, without a pace
+        val long = RunStep.flatten(plan.workouts[14], plan.paces)
+        assertEquals(listOf("Warm-up walk", "Run", "Cool-down walk"), long.map { it.label })
+        val ls = simulate(RunEngine("Non-stop run", long)) { if (it.current.walk) 600.0 else 450.0 }.map { it.second.speech() }
+        assertTrue("Halfway. Keep it steady and easy." in ls, ls.joinToString("\n"))
+        assertTrue("That's all the running done. Cool down by walking for 5 minutes." in ls, ls.joinToString("\n"))
+        assertTrue(ls.none { it.contains("Last one") })
+    }
 }

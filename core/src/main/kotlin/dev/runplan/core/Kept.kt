@@ -15,7 +15,8 @@ object Kept {
      */
     fun apply(plan: Plan, kept: Collection<Workout>): Plan {
         val start = plan.profile.startEpochDay
-        val race = plan.profile.raceEpochDay
+        // a beginner plan has no race: it ends on the Sunday stored as race day, which can hold a session
+        val race = plan.profile.raceEpochDay + if (plan.profile.beginner) 1 else 0
         val week0 = PlanBuilder.mondayOf(start)
         val fit = kept.filter { it.type != SessionType.RACE && it.planDay in start until race && it.epochDay in start until race }
         if (fit.isEmpty()) return plan

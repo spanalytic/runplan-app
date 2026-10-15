@@ -136,6 +136,7 @@ class Step:
     metres: float | None = None
     zone: str | None = None   # E, M, HM, T, I, R or None (no target)
     hill: bool = False        # uphill by effort (recovery: back down); no pace target
+    walk: bool = False        # walked (beginner plan); no pace target
 
 
 @dataclass
@@ -165,7 +166,7 @@ class Workout:
     def estimate(self, p: Paces) -> tuple[float, float]:
         km = mins = 0.0
         for s in self._flat():
-            pace = p.centre(s.zone) if s.zone else p.easy[1] + 20  # jog
+            pace = p.centre(s.zone) if s.zone else WALK_PACE if s.walk else p.easy[1] + 20  # jog
             secs = s.secs if s.secs is not None else (60 if s.hill and s.metres is None else None)
             if s.metres is not None:
                 km += s.metres / 1000
@@ -180,6 +181,8 @@ class Workout:
             amt = (f"{s.metres / 1000:g} km" if s.metres is not None
                    else f"{s.secs / 60:g} min" if s.secs is not None else "lap button")
             if s.zone is None:
+                if s.walk:
+                    return f"{amt} walk"
                 if s.hill:
                     if s.secs is None:
                         return "jog to/down the hill (lap button)"
@@ -504,6 +507,71 @@ def build_plan(paces: Paces, goal: str, start: date, race_day: date,
 
 
 # --------------------------------------------------------------------------- #
+# Beginner plan (StartRunning.kt): 9 weeks x 3 run/walk sessions to 30 min non-stop
+# --------------------------------------------------------------------------- #
+
+WALK_PACE = 600.0          # s/km, estimates only
+BEGINNER_WEEKS, BEGINNER_PER_WEEK = 9, 3
+BEGINNER_DAYS = ["tue", "thu", "sat"]
+
+
+def _run(sec: int) -> Step:
+    return Step("interval", secs=sec)
+
+
+def _walk(sec: int) -> Step:
+    return Step("recovery", secs=sec, walk=True)
+
+
+def beginner_main(week: int, n: int) -> list:
+    """The running part of programme week 1..9, session 1..3 (NHS Couch to 5K)."""
+    if week == 1:
+        return [Repeat(8, [_run(60), _walk(90)])]
+    if week == 2:
+        return [Repeat(6, [_run(90), _walk(120)])]
+    if week == 3:
+        return [Repeat(2, [_run(90), _walk(90), _run(180), _walk(180)])]
+    if week == 4:
+        return [_run(180), _walk(90), _run(300), _walk(150), _run(180), _walk(90), _run(300)]
+    if week == 5:
+        return {1: [Repeat(3, [_run(300), _walk(180)])],
+                2: [_run(480), _walk(300), _run(480)]}.get(n, [_run(1200)])
+    if week == 6:
+        return {1: [_run(300), _walk(180), _run(480), _walk(180), _run(300)],
+                2: [_run(600), _walk(180), _run(600)]}.get(n, [_run(1500)])
+    return [_run({7: 1500, 8: 1680}.get(week, 1800))]
+
+
+def beginner_note(week: int, n: int, non_stop: bool) -> str:
+    if week == 1 and n == 1:
+        return "Your first session. Run slowly enough that you could still talk, and walk briskly in between."
+    if week == BEGINNER_WEEKS and n == BEGINNER_PER_WEEK:
+        return "The last run of the plan: 30 minutes without stopping."
+    if non_stop and week in (5, 6):
+        return "Your longest run yet. Go slower than feels necessary: it's about time, not speed."
+    return "Run slowly enough that you could still talk."
+
+
+def build_beginner_plan(start: date, days: list[str]) -> list[Workout]:
+    """Sessions laid one after another on the 3 run days from the start day; weeks are calendar weeks."""
+    if len(days) != BEGINNER_PER_WEEK:
+        raise SystemExit("a beginner plan needs exactly 3 run days")
+    week0 = start - timedelta(days=start.weekday())
+    plan: list[Workout] = []
+    d = start
+    while len(plan) < BEGINNER_WEEKS * BEGINNER_PER_WEEK:
+        if DAY_NAMES[d.weekday()] in days:
+            week, n = len(plan) // 3 + 1, len(plan) % 3 + 1
+            main = beginner_main(week, n)
+            non_stop = len(main) == 1 and isinstance(main[0], Step)
+            blocks = [Step("warmup", secs=300, walk=True)] + main + [Step("cooldown", secs=300, walk=True)]
+            plan.append(Workout(d, (d - week0).days // 7 + 1, "Start running",
+                                "NonStop" if non_stop else "RunWalk", blocks, beginner_note(week, n, non_stop)))
+        d += timedelta(days=1)
+    return plan
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 
@@ -513,9 +581,11 @@ def next_monday(d: date) -> date:
 
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--recent", required=True,
+    ap.add_argument("--beginner", action="store_true",
+                    help="9-week run/walk plan to 30 minutes non-stop (no --recent or --goal needed)")
+    ap.add_argument("--recent",
                     help="recent race/time trial as DIST=TIME, e.g. 10k=52:30, 5k=24:10, half=1:55:00")
-    ap.add_argument("--goal", required=True, choices=GOALS, help="goal race distance")
+    ap.add_argument("--goal", choices=GOALS, help="goal race distance")
     ap.add_argument("--race-date", type=date.fromisoformat, help="YYYY-MM-DD (default: start + --weeks)")
     ap.add_argument("--weeks", type=int, default=12, help="plan length if --race-date not given")
     ap.add_argument("--start", type=date.fromisoformat, help="first day of plan (default: next Monday)")
@@ -530,6 +600,11 @@ def main(argv=None) -> None:
                     help="only export sessions on/after this date (use after a recalibration)")
     ap.add_argument("--out", default="plan_out", help="output directory")
     a = ap.parse_args(argv)
+    if a.beginner:
+        # paces only feed the estimates: a 40-minute 5K, as in the app
+        a.recent, a.goal = a.recent or "5k=40:00", "5k"
+    elif not (a.recent and a.goal):
+        ap.error("--recent and --goal are required (or use --beginner)")
 
     dist_key, t_txt = a.recent.split("=")
     if dist_key not in DISTANCES:
@@ -540,12 +615,18 @@ def main(argv=None) -> None:
 
     start = a.start or next_monday(date.today())
     race_day = a.race_date or (start + timedelta(weeks=a.weeks) - timedelta(days=start.weekday() + 1))
-    days = [d.strip().lower()[:3] for d in a.days.split(",")] if a.days else DEFAULT_DAYS[a.runs_per_week]
+    days = ([d.strip().lower()[:3] for d in a.days.split(",")] if a.days
+            else BEGINNER_DAYS if a.beginner else DEFAULT_DAYS[a.runs_per_week])
     days = sorted(set(days), key=DAY_NAMES.index)
     if len(days) < 3:
         raise SystemExit("need at least 3 run days")
 
-    plan = build_plan(paces, a.goal, start, race_day, days, a.current_km, a.peak_km, a.terrain, a.hills)
+    if a.beginner:
+        plan = build_beginner_plan(start, days)
+        last = plan[-1].day
+        race_day = last + timedelta(days=6 - last.weekday())
+    else:
+        plan = build_plan(paces, a.goal, start, race_day, days, a.current_km, a.peak_km, a.terrain, a.hills)
     if a.from_date:
         plan = [w for w in plan if w.day >= a.from_date]
 

@@ -64,7 +64,16 @@ fun SettingsTab(modifier: Modifier, editPlan: () -> Unit, newPlan: () -> Unit) {
 
         val p = plan?.paces
         val profile = state.profile
-        if (p != null && profile != null) {
+        if (p != null && profile != null && profile.beginner) {
+            Section("Your plan")
+            Text(
+                "Nine weeks of run and walk sessions, three a week, building to 30 minutes of running without stopping. " +
+                    "There are no paces to hit: run slowly enough that you could still talk.",
+                style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+            )
+            Spacer(Modifier.height(8.dp))
+            Action("Edit plan", "Change your run days, or switch to a race plan once you can run 5K.", editPlan)
+        } else if (p != null && profile != null) {
             Section("Your paces")
             val goalM = profile.goal.distance.metres
             val goalName = profile.goal.label.let { if (it.endsWith("K")) it else it.lowercase() }

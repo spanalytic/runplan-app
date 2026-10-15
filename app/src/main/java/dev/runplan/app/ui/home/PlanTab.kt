@@ -104,12 +104,17 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
         item {
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 12.dp)) {
                 val weeksLeft = ((p.profile.raceEpochDay - today + 6) / 7).coerceAtLeast(0)
+                val weeks = "$weeksLeft ${if (weeksLeft == 1L) "week" else "weeks"}"
                 Text(
-                    if (today > p.profile.raceEpochDay) "${p.profile.goal.label} plan complete"
-                    else "${p.profile.goal.label} in $weeksLeft ${if (weeksLeft == 1L) "week" else "weeks"}",
+                    when {
+                        p.profile.beginner && today > p.profile.raceEpochDay -> "Plan complete: you can run for 30 minutes"
+                        p.profile.beginner -> "Running 30 minutes non-stop in $weeks"
+                        today > p.profile.raceEpochDay -> "${p.profile.goal.label} plan complete"
+                        else -> "${p.profile.goal.label} in $weeks"
+                    },
                     style = MaterialTheme.typography.titleSmall, color = Palette.Slate,
                 )
-                if (weeksLeft >= 2) {
+                if (weeksLeft >= 2 && !p.profile.beginner) {
                     val goalM = p.profile.goal.distance.metres
                     val (lo, hi) = Vdot.projected(p.paces.vdot, weeksLeft.toInt())
                     Text(
@@ -245,7 +250,8 @@ private fun WeekHeader(p: Plan, week: Int, ws: List<Workout>) {
             Text("Week $week", style = MaterialTheme.typography.headlineSmall)
             Spacer(Modifier.width(10.dp))
             Text(ws.first().phase.label, style = MaterialTheme.typography.bodyMedium, color = Palette.Slate, modifier = Modifier.weight(1f).padding(bottom = 2.dp))
-            Text("${km.roundToInt()} km, ${Fmt.estimate(min * 60)}", style = MaterialTheme.typography.labelMedium, color = Palette.Slate, modifier = Modifier.padding(bottom = 3.dp))
+            // beginner distances are guesses (no fitness to go on), so only the time shows
+            Text(if (p.profile.beginner) Fmt.estimate(min * 60) else "${km.roundToInt()} km, ${Fmt.estimate(min * 60)}", style = MaterialTheme.typography.labelMedium, color = Palette.Slate, modifier = Modifier.padding(bottom = 3.dp))
         }
         Spacer(Modifier.height(8.dp))
         HorizontalDivider(Modifier.padding(horizontal = 20.dp), color = Palette.Line)

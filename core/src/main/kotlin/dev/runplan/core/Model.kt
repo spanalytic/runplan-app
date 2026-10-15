@@ -8,6 +8,7 @@ enum class StepKind { WARMUP, INTERVAL, RECOVERY, COOLDOWN, READY }
 /**
  * One step. Exactly one of [secs]/[metres] is set, or neither for an open-ended step.
  * [hill] steps are run uphill by effort (no pace target); their recoveries go back down.
+ * [walk] steps are walked (beginner plans): warm-up, cool-down and the breaks between runs.
  */
 data class Step(
     val kind: StepKind,
@@ -15,15 +16,33 @@ data class Step(
     val metres: Double? = null,
     val zone: Zone? = null,
     val hill: Boolean = false,
+    val walk: Boolean = false,
 ) {
-    /** Zone used to colour and size the step in a workout shape: hill efforts show as hard. */
-    val shapeZone: Zone? get() = zone ?: if (hill && kind == StepKind.INTERVAL) Zone.I else null
+    /** Zone used to colour and size the step in a workout shape: hill efforts show as hard, untargeted runs as easy. */
+    val shapeZone: Zone? get() = shapeZoneOf(zone, kind, hill, walk)
 
     /** Open (ends with a tap). */
     val isOpen: Boolean get() = secs == null && metres == null
 
     /** Duration for estimates: an open hill step (getting to or back down the hill) counts as a minute. */
     val estSecs: Double? get() = secs ?: if (hill && isOpen) 60.0 else null
+}
+
+/** Shape colour for a step: hill efforts show as hard, untargeted running as easy, walking as nothing. */
+internal fun shapeZoneOf(zone: Zone?, kind: StepKind, hill: Boolean, walk: Boolean): Zone? = zone ?: when {
+    walk || kind != StepKind.INTERVAL -> null
+    hill -> Zone.I
+    else -> Zone.E
+}
+
+/** Brisk walking pace (s/km), for estimates only. */
+const val WALK_PACE = 600.0
+
+/** How much running someone has done. Beginners get a run/walk plan with no race time needed. */
+enum class Level(val label: String, val help: String) {
+    BEGINNER("New to running", "I can't run for 30 minutes without stopping yet"),
+    INTERMEDIATE("Regular runner", "I run most weeks and can run 5K or more"),
+    ADVANCED("Experienced", "I train for races and run several times a week"),
 }
 
 /** How hilly the goal race is. Decides how often hill repeats replace interval sessions. */
@@ -47,7 +66,7 @@ enum class Goal(val distance: Distance, val label: String, val peakKmAt5Days: Do
     val minWeeks: Int get() = taper.size + 3
 }
 
-enum class Phase(val label: String) { BASE("Base"), BUILD("Build"), PEAK("Peak"), TAPER("Taper"), RACE("Race") }
+enum class Phase(val label: String) { BASE("Base"), BUILD("Build"), PEAK("Peak"), TAPER("Taper"), RACE("Race"), START("Start running") }
 
 enum class SessionType(val label: String, val quality: Boolean) {
     STRIDES("Strides", true),
@@ -63,6 +82,10 @@ enum class SessionType(val label: String, val quality: Boolean) {
     EASY("Easy run", false),
     RACE("Race day", true),
     FREE("Free run", false),
+    /** Beginner plan: runs with walk breaks between them. */
+    RUN_WALK("Run and walk", false),
+    /** Beginner plan: running without walk breaks. */
+    NON_STOP("Non-stop run", false),
     /** Built by the runner (see [CustomWorkout]); not part of the plan. */
     CUSTOM("Your own workout", false),
 }
@@ -94,7 +117,7 @@ data class Workout(
         var km = 0.0
         var min = 0.0
         for (s in flatSteps()) {
-            val pace = s.zone?.let { p.centre(it) } ?: p.jog
+            val pace = s.zone?.let { p.centre(it) } ?: if (s.walk) WALK_PACE else p.jog
             when {
                 s.metres != null -> { km += s.metres / 1000; min += s.metres / 1000 * pace / 60 }
                 s.estSecs != null -> { min += s.estSecs!! / 60; km += s.estSecs!! / pace }
@@ -128,8 +151,11 @@ data class Profile(
     val terrain: Terrain = Terrain.FLAT,
     /** Swap some interval and strides sessions for hill sessions. */
     val hills: Boolean = false,
+    val level: Level = Level.INTERMEDIATE,
 ) {
     val paces: Paces get() = Paces.of(recentDistance, recentSec, goal.distance)
+    /** A run/walk plan ([StartRunning]): no race, no pace targets, no fitness to set. */
+    val beginner: Boolean get() = level == Level.BEGINNER
 }
 
 data class Plan(

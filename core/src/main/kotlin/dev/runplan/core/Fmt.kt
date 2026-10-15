@@ -70,7 +70,9 @@ object Fmt {
         else -> amount(s) + when {
             s.zone != null -> " ${s.zone.word}"
             s.hill && s.kind == StepKind.INTERVAL -> " uphill"
+            s.walk -> " walk"
             s.kind == StepKind.RECOVERY -> " jog"
+            s.kind == StepKind.INTERVAL && !s.isOpen -> " run"
             else -> ""
         }
     }

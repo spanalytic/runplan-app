@@ -16,11 +16,21 @@ data class RunStep(
     val typical: Double = Double.NaN,
     /** Uphill by effort (or the way back down for a recovery). No pace target. */
     val hill: Boolean = false,
+    /** Walked, not run (beginner sessions). */
+    val walk: Boolean = false,
+    /** Part of a beginner run/walk session: plain "run" and "walk" cues, no lap results. */
+    val runWalk: Boolean = false,
+    /** The last run of a run/walk session with several runs. */
+    val lastRun: Boolean = false,
 ) {
-    /** Stored/sent zone code: the zone, "H" for a hill effort, "" otherwise. */
-    val zoneCode: String get() = zone?.code ?: if (hill && kind == StepKind.INTERVAL) HILL_CODE else ""
-    /** Zone used to colour and size the step in a workout shape: hill efforts show as hard. */
-    val shapeZone: Zone? get() = zone ?: if (hill && kind == StepKind.INTERVAL) Zone.I else null
+    /** Stored/sent zone code: the zone, "H" for a hill effort, "W" for a walk, "" otherwise. */
+    val zoneCode: String get() = zone?.code ?: when {
+        walk -> WALK_CODE
+        hill && kind == StepKind.INTERVAL -> HILL_CODE
+        else -> ""
+    }
+    /** Zone used to colour and size the step in a workout shape: hill efforts show as hard, untargeted runs as easy. */
+    val shapeZone: Zone? get() = shapeZoneOf(zone, kind, hill, walk)
     val hasTarget: Boolean get() = zone != null && fast.isFinite()
     /** Only a "no faster than" limit (easy running): there is no too-slow. */
     val capOnly: Boolean get() = hasTarget && !slow.isFinite()
@@ -35,6 +45,8 @@ data class RunStep(
         return when {
             hasTarget -> "$amt @ ${Fmt.band(fast, slow)}"
             kind == StepKind.READY -> "$amt countdown"
+            walk -> "$amt walk"
+            runWalk -> "$amt run"
             hill && isOpen -> if (label == TO_HILL) "tap Next when you're there" else "tap Next at the bottom"
             hill && kind == StepKind.INTERVAL -> "$amt hard uphill"
             hill && kind == StepKind.RECOVERY -> "$amt rest"
@@ -45,13 +57,15 @@ data class RunStep(
 
     companion object {
         const val HILL_CODE = "H"
+        const val WALK_CODE = "W"
         const val TO_HILL = "To the hill"
 
         fun flatten(w: Workout, p: Paces): List<RunStep> {
+            if (w.type == SessionType.RUN_WALK || w.type == SessionType.NON_STOP) return runWalkSteps(w)
             val out = ArrayList<RunStep>()
             fun add(st: Step, label: String) {
                 val (f, s) = st.zone?.let { p.target(it) } ?: (Double.NaN to Double.NaN)
-                out += RunStep(label, st.kind, st.secs, st.metres, st.zone, f, s, st.zone?.let { p.centre(it) } ?: Double.NaN, st.hill)
+                out += RunStep(label, st.kind, st.secs, st.metres, st.zone, f, s, st.zone?.let { p.centre(it) } ?: Double.NaN, st.hill, st.walk)
             }
             fun baseLabel(st: Step) = when (st.kind) {
                 StepKind.WARMUP -> "Warm-up"
@@ -80,6 +94,26 @@ data class RunStep(
                 }
             }
             return out
+        }
+
+        /** Beginner session: "Warm-up walk", "Run 1 of 8", "Walk", ..., "Cool-down walk". No pace targets. */
+        private fun runWalkSteps(w: Workout): List<RunStep> {
+            val flat = w.flatSteps()
+            val runs = flat.count { !it.walk }
+            var n = 0
+            return flat.map { st ->
+                val label = when {
+                    st.walk && st.kind == StepKind.WARMUP -> "Warm-up walk"
+                    st.walk && st.kind == StepKind.COOLDOWN -> "Cool-down walk"
+                    st.walk -> "Walk"
+                    runs > 1 -> "Run ${++n} of $runs"
+                    else -> "Run"
+                }
+                RunStep(
+                    label, st.kind, st.secs, st.metres, null, Double.NaN, Double.NaN,
+                    walk = st.walk, runWalk = true, lastRun = !st.walk && runs > 1 && n == runs,
+                )
+            }
         }
     }
 }
@@ -116,6 +150,7 @@ sealed interface Cue {
     /** Text for text-to-speech. Targets are spoken as the middle of the band. */
     fun speech(): String = when (this) {
         is StepStart -> when {
+            step.runWalk -> runWalkStart(this)
             step.kind == StepKind.READY ->
                 "Get ready." + (next?.let { " ${it.label} in ${spokenDuration(step.secs ?: 10.0)}: ${spokenStep(it)}." } ?: "")
             afterCountdown -> "Go!"
@@ -132,9 +167,13 @@ sealed interface Cue {
             }
         }
         // the 10 s rest at the top of a hill rep needs no announcing
-        is Countdown -> left + if (next != null && !(next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) " Next: ${next.label}, ${spokenStep(next)}." else ""
+        is Countdown -> left + if (next?.runWalk == true) when {
+            next.walk && next.kind == StepKind.COOLDOWN -> " Then cool down with a walk."
+            next.walk -> " Then walk."
+            else -> " Then run for ${spokenDuration(next.secs ?: 0.0)}."
+        } else if (next != null && !(next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) " Next: ${next.label}, ${spokenStep(next)}." else ""
         is Remaining -> text
-        is Halfway -> "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
+        is Halfway -> if (step.runWalk) "Halfway. Keep it steady and easy." else "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
             (verdict(pace, step.fast, step.slow)?.let { ", $it" } ?: "") + "."
         is PaceAlert -> when {
             step.capOnly -> "Ease off. Pace ${spokenPace(pace)}, keep it slower than ${spokenPace(step.fast)}."
@@ -153,6 +192,19 @@ sealed interface Cue {
     }
 
     companion object {
+        /** Beginner cues: short and plain, no paces or lap results. */
+        private fun runWalkStart(c: StepStart): String {
+            val st = c.step
+            val amt = spokenDuration(st.secs ?: 0.0)
+            return when {
+                st.walk && st.kind == StepKind.WARMUP -> "Let's go. Start by walking briskly for $amt."
+                st.walk && st.kind == StepKind.COOLDOWN ->
+                    (if (c.prev?.zoneCode != RunStep.WALK_CODE) "That's all the running done. " else "") + "Cool down by walking for $amt."
+                st.walk -> (if (c.next?.kind == StepKind.COOLDOWN) "That's all the running done. " else "") + "Walk for $amt."
+                else -> "Run for $amt, nice and easy." + if (st.lastRun) " Last one!" else ""
+            }
+        }
+
         private fun opener(st: RunStep): String = when (st.kind) {
             StepKind.WARMUP -> "Let's go."
             StepKind.COOLDOWN -> "Last one."
@@ -407,7 +459,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             st.metres != null && st.metres >= 1000 -> stepM() >= st.metres / 2
             else -> false
         }
-        if (half && said.add("half")) {
+        if (half && !st.walk && said.add("half")) {
             val sofar = if (stepM() >= 20) stepSec() / (stepM() / 1000) else Double.NaN
             if (sofar.isFinite()) cues += Cue.Halfway(sofar, st)
         }
@@ -477,7 +529,8 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         val paced = results.mapNotNull { it.onOrAhead }
         return Cue.Finished(
             distanceM, elapsedMs / 1000.0,
-            lastLap = if (steps.size > 1) last else null,
+            // beginners get a plain summary, without the cool-down walk read out as a lap
+            lastLap = if (steps.size > 1 && !steps.first().runWalk) last else null,
             onTarget = paced.count { it }, targeted = paced.size,
         )
     }

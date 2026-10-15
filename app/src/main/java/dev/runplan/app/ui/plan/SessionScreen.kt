@@ -85,7 +85,7 @@ fun SessionScreen(id: String, onBack: () -> Unit, startRun: (String?) -> Unit) {
             Spacer(Modifier.height(24.dp))
             WorkoutShape(bars(w, p), height = 96.dp)
             Spacer(Modifier.height(16.dp))
-            Text("Takes about ${Fmt.estimate(min * 60)}, %.1f km".format(km), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
+            Text(if (plan!!.profile.beginner) "Takes about ${Fmt.estimate(min * 60)}" else "Takes about ${Fmt.estimate(min * 60)}, %.1f km".format(km), style = MaterialTheme.typography.bodyMedium, color = Palette.Slate)
             Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = Palette.Line)
             w.blocks.forEach { b ->
@@ -128,9 +128,10 @@ private fun StepLine(s: Step, p: Paces, indent: Boolean) {
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 val name = when (s.kind) {
-                    StepKind.WARMUP -> "Warm-up"
-                    StepKind.COOLDOWN -> "Cool-down"
+                    StepKind.WARMUP -> if (s.walk) "Warm-up walk" else "Warm-up"
+                    StepKind.COOLDOWN -> if (s.walk) "Cool-down walk" else "Cool-down"
                     StepKind.RECOVERY -> when {
+                        s.walk -> "Walk"
                         !s.hill -> "Recovery jog"
                         s.isOpen && !indent -> "Jog to the hill"
                         s.isOpen -> "Jog back down"

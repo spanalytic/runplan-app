@@ -132,7 +132,8 @@ private fun Fitness(runs: List<RunRecord>, plan: Plan?, today: Long) {
     }
     Section("Fitness", "Your predicted $goalName time, from your best effort of a mile or more in the last 6 weeks")
     val recent = points.filter { it.run.epochDay > today - 42 }.maxByOrNull { it.effort.vdot }
-    val planScore = plan?.paces?.vdot
+    // a beginner plan's paces are a placeholder, not something to compare with
+    val planScore = plan?.takeIf { !it.profile.beginner }?.paces?.vdot
     if (recent == null) {
         Text(
             "Run something hard over a mile or more, like a race, time trial or parkrun, and your predicted race time shows here.",

@@ -61,14 +61,19 @@ import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Distance
 import dev.runplan.core.Fmt
 import dev.runplan.core.Goal
+import dev.runplan.core.Level
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
+import dev.runplan.core.StartRunning
 import dev.runplan.core.Terrain
 import dev.runplan.core.Vdot
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
-private const val PAGES = 6
+/** The questions, in order. Beginners skip everything about races and fitness. */
+private enum class Page { LEVEL, FITNESS, GOAL, HILLS, RACE, DAYS, VOLUME }
+private val RACE_PAGES = Page.entries.toList()
+private val BEGINNER_PAGES = listOf(Page.LEVEL, Page.DAYS)
 private const val DAY_MS = 86_400_000L
 private val DAY_LETTERS = listOf("M", "T", "W", "T", "F", "S", "S")
 private val INPUT_DISTANCES = listOf(Distance.MILE, Distance.K3, Distance.K5, Distance.K10, Distance.HALF, Distance.MARATHON)
@@ -80,30 +85,34 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
     var page by rememberSaveable { mutableIntStateOf(0) }
 
     // answers
-    var distance by rememberSaveable { mutableStateOf(existing?.recentDistance ?: Distance.K5) }
-    val secs = existing?.recentSec?.roundToInt() ?: 0
+    var level by rememberSaveable { mutableStateOf(existing?.level ?: Level.INTERMEDIATE) }
+    val beginner = level == Level.BEGINNER
+    // a beginner plan stores a placeholder fitness, which isn't theirs to see
+    val known = existing?.takeIf { !it.beginner }
+    var distance by rememberSaveable { mutableStateOf(known?.recentDistance ?: Distance.K5) }
+    val secs = known?.recentSec?.roundToInt() ?: 0
     var hh by rememberSaveable { mutableStateOf(if (secs >= 3600) (secs / 3600).toString() else "") }
     var mm by rememberSaveable { mutableStateOf(if (secs > 0) ((secs % 3600) / 60).toString() else "") }
     var ss by rememberSaveable { mutableStateOf(if (secs > 0) (secs % 60).toString().padStart(2, '0') else "") }
     var goal by rememberSaveable { mutableStateOf(existing?.goal ?: Goal.HALF) }
     var terrain by rememberSaveable { mutableStateOf(existing?.terrain ?: Terrain.FLAT) }
     var hills by rememberSaveable { mutableStateOf(existing?.hills ?: false) }
-    var race by rememberSaveable { mutableStateOf(existing?.raceEpochDay ?: (today + 7 * 12)) }
+    var race by rememberSaveable { mutableStateOf(known?.raceEpochDay ?: (today + 7 * 12)) }
     var days by rememberSaveable { mutableStateOf(existing?.days ?: listOf(1, 2, 4, 6)) }
-    var km by rememberSaveable { mutableFloatStateOf(existing?.currentKm?.toFloat() ?: 25f) }
-    val start = existing?.startEpochDay?.coerceAtMost(race) ?: today
+    var km by rememberSaveable { mutableFloatStateOf(known?.currentKm?.toFloat() ?: 25f) }
+    // switching plan type starts afresh from today
+    val start = existing?.takeIf { it.beginner == beginner }?.startEpochDay?.let { if (beginner) it else it.coerceAtMost(race) } ?: today
+    val pages = if (beginner) BEGINNER_PAGES else RACE_PAGES
 
     val timeSec = (hh.toIntOrNull() ?: 0) * 3600 + (mm.toIntOrNull() ?: 0) * 60 + (ss.toIntOrNull() ?: 0)
     val vdot = if (timeSec > 0) Vdot.vdot(distance.metres, timeSec.toDouble()) else Double.NaN
     val vdotOk = vdot.isFinite() && vdot in 20.0..85.0
     val weeks = PlanBuilder.weeksBetween(start, race)
 
-    val valid = when (page) {
-        0 -> vdotOk
-        1 -> true
-        2 -> true
-        3 -> race >= start && weeks >= goal.minWeeks
-        4 -> days.size in 3..6
+    val valid = when (pages[page]) {
+        Page.FITNESS -> vdotOk
+        Page.RACE -> race >= start && weeks >= goal.minWeeks
+        Page.DAYS -> if (beginner) days.size == StartRunning.PER_WEEK else days.size in 3..6
         else -> true
     }
 
@@ -121,7 +130,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                 Spacer(Modifier.size(48.dp))
             }
             Row(Modifier.weight(1f).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                repeat(PAGES) { i ->
+                repeat(pages.size) { i ->
                     Box(
                         Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp))
                             .background(if (i <= page) Palette.Ink else Palette.Line),
@@ -135,8 +144,37 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         ) {
             Spacer(Modifier.height(16.dp))
-            when (page) {
-                0 -> {
+            when (pages[page]) {
+                Page.LEVEL -> {
+                    Question("How much running have you done?", "This decides the kind of plan you get.")
+                    Level.entries.forEach { lv ->
+                        val selected = lv == level
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) Palette.Ink else Color.Transparent)
+                                .clickable {
+                                    level = lv
+                                    // beginner plans run on exactly 3 days, ideally with rest between
+                                    if (lv == Level.BEGINNER && days.size != StartRunning.PER_WEEK) days = listOf(1, 3, 5)
+                                }
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                        ) {
+                            Text(lv.label, style = MaterialTheme.typography.headlineSmall, color = if (selected) Color.White else Palette.Ink)
+                            Text(lv.help, style = MaterialTheme.typography.bodyMedium, color = if (selected) Color.White.copy(alpha = 0.8f) else Palette.Slate)
+                        }
+                        HorizontalDivider(color = Palette.Line)
+                    }
+                    if (beginner) {
+                        Spacer(Modifier.height(24.dp))
+                        Text(
+                            "You'll get a 9-week plan of three sessions a week. It starts with short runs and walking breaks, " +
+                                "and builds to running for 30 minutes without stopping. No race time needed.",
+                            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+                        )
+                    }
+                }
+
+                Page.FITNESS -> {
                     Question("What's a recent race or all-out effort?", "Your training paces come from this. A parkrun or time trial from the last couple of months works best.")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         INPUT_DISTANCES.forEach { d ->
@@ -166,7 +204,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     }
                 }
 
-                1 -> {
+                Page.GOAL -> {
                     Question("What are you training for?", "Predicted times are for your current fitness. The plan aims to improve on them.")
                     Goal.entries.forEach { g ->
                         val selected = g == goal
@@ -188,7 +226,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     }
                 }
 
-                2 -> {
+                Page.HILLS -> {
                     Question("Is your race hilly?", "Hill sessions build strength for climbs, and help on any course.")
                     Terrain.entries.forEach { tr ->
                         val selected = tr == terrain
@@ -220,7 +258,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     }
                 }
 
-                3 -> {
+                Page.RACE -> {
                     Question("When's race day?", "A ${goal.label.lowercase()} plan needs at least ${goal.minWeeks} weeks.")
                     val minDay = start + (goal.minWeeks - 1) * 7L
                     val state = rememberDatePickerState(
@@ -246,9 +284,10 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     )
                 }
 
-                4 -> {
-                    Question("Which days can you run?", "Pick 3 to 6. Your first day is intervals and your last is the long run.")
-                    val roles = PlanBuilder.roleLabels(days)
+                Page.DAYS -> {
+                    if (beginner) Question("Which days can you run?", "Pick 3. A rest day between runs helps your body adapt.")
+                    else Question("Which days can you run?", "Pick 3 to 6. Your first day is intervals and your last is the long run.")
+                    val roles = PlanBuilder.roleLabels(days, beginner)
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         DAY_LETTERS.forEachIndexed { i, letter ->
                             val on = i in days
@@ -267,13 +306,23 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                             }
                         }
                     }
-                    if (days.size !in 3..6) {
+                    if (beginner && days.size != StartRunning.PER_WEEK) {
+                        Spacer(Modifier.height(16.dp))
+                        Text(if (days.size < 3) "Pick 3 days." else "Pick just 3 days. Rest days matter while you're starting out.", color = MaterialTheme.colorScheme.error)
+                    } else if (beginner) {
+                        Spacer(Modifier.height(16.dp))
+                        val end = LocalDate.ofEpochDay(StartRunning.dates(start, days).last())
+                        Text(
+                            "Your last session is on ${end.dayOfMonth} ${end.month.name.lowercase().replaceFirstChar(Char::uppercase)}.",
+                            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+                        )
+                    } else if (days.size !in 3..6) {
                         Spacer(Modifier.height(16.dp))
                         Text(if (days.size < 3) "Pick at least 3 days." else "6 days is the maximum; keep one rest day.", color = MaterialTheme.colorScheme.error)
                     }
                 }
 
-                else -> {
+                Page.VOLUME -> {
                     Question("How much are you running now?", "Your average over the last month. The plan builds from here by no more than 10% a week.")
                     Row(verticalAlignment = Alignment.Bottom) {
                         Text("${km.roundToInt()}", style = MaterialTheme.typography.displayLarge)
@@ -291,15 +340,22 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
 
         Button(
             onClick = {
-                if (page < PAGES - 1) page++ else onDone(
-                    Profile(distance, timeSec.toDouble(), goal, start, race, days.sorted(), km.roundToInt().toDouble(), existing?.peakKm, terrain, hills),
+                if (page < pages.size - 1) page++
+                else if (beginner) onDone(
+                    Profile(
+                        StartRunning.NOMINAL_DISTANCE, StartRunning.NOMINAL_SEC, Goal.K5, start,
+                        StartRunning.endDay(start, days), days.sorted(), 0.0, level = level,
+                    ),
+                )
+                else onDone(
+                    Profile(distance, timeSec.toDouble(), goal, start, race, days.sorted(), km.roundToInt().toDouble(), known?.peakKm, terrain, hills, level),
                 )
             },
             enabled = valid,
             modifier = Modifier.fillMaxWidth().padding(24.dp).height(56.dp),
             shape = RoundedCornerShape(12.dp),
         ) {
-            Text(if (page < PAGES - 1) "Continue" else if (existing != null) "Update my plan" else "Build my plan")
+            Text(if (page < pages.size - 1) "Continue" else if (existing != null) "Update my plan" else "Build my plan")
         }
     }
 }

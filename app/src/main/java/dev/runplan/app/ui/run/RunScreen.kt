@@ -60,6 +60,7 @@ import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Fmt
 import dev.runplan.core.PaceStatus
 import dev.runplan.core.RunState
+import dev.runplan.core.RunStep
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.delay
 
@@ -194,6 +195,7 @@ private fun ActiveRun(
         Text(
             when {
                 s.fast.isFinite() -> "Target ${Fmt.band(s.fast, s.slow)}"
+                s.zoneCode == RunStep.WALK_CODE -> "Brisk walk"
                 else -> "Pace per km"
             },
             style = MaterialTheme.typography.titleLarge, color = ink,

@@ -7,11 +7,15 @@ package dev.runplan.core
  */
 object Moves {
 
-    /** Days [w] can go to: its own Monday to Sunday, never the race day or after it, never before the plan starts. */
+    /**
+     * Days [w] can go to: its own Monday to Sunday, never the race day or after it, never before the plan starts.
+     * A beginner plan has no race: its "race day" is the Sunday it ends, which is free to use.
+     */
     fun choices(plan: Plan, w: Workout): List<Long> {
         if (w.type == SessionType.RACE) return emptyList()
         val monday = PlanBuilder.mondayOf(w.planDay)
-        return (monday until monday + 7).filter { it >= plan.profile.startEpochDay && it < plan.profile.raceEpochDay }
+        val last = plan.profile.raceEpochDay - if (plan.profile.beginner) 0 else 1
+        return (monday until monday + 7).filter { it >= plan.profile.startEpochDay && it <= last }
     }
 
     /** [plan] with [moves] applied, sorted by day. */

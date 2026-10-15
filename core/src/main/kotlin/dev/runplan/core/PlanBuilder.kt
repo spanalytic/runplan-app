@@ -44,7 +44,8 @@ object PlanBuilder {
     }
 
     /** Role of each weekday for display during onboarding. */
-    fun roleLabels(days: List<Int>): Map<Int, String> {
+    fun roleLabels(days: List<Int>, beginner: Boolean = false): Map<Int, String> {
+        if (beginner) return days.associateWith { "Run" }
         if (days.size < 3) return emptyMap()
         return roles(days.sorted()).mapValues {
             when (it.value) { Role.Q1 -> "Intervals"; Role.Q2 -> "Tempo"; Role.LONG -> "Long"; Role.EASY -> "Easy" }
@@ -158,6 +159,7 @@ object PlanBuilder {
     }
 
     fun build(profile: Profile): Plan {
+        if (profile.beginner) return StartRunning.build(profile)
         val goal = profile.goal
         val paces = profile.paces
         val days = profile.days.distinct().sorted()
