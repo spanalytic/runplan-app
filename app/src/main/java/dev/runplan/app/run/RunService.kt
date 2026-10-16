@@ -189,12 +189,15 @@ class RunService : LifecycleService() {
         if (engine == null || phase != RunPhase.READY || countdownJob != null) return
         countdownJob = lifecycleScope.launch {
             val voice = store.state.value.settings.voice
-            if (voice) speaker.hold()
+            if (voice) {
+                speaker.hold()
+                // one utterance: spoken as separate one-word utterances, only the first was heard
+                speaker.speak(COUNTDOWN_WORDS)
+            }
             for (n in COUNTDOWN_SEC downTo 1) {
                 countdown = n
                 RunSession.update { it.copy(countdown = n) }
                 publish()
-                if (voice) speaker.speak(n.toString())
                 buzz(longArrayOf(0, 60))
                 delay(1000)
             }
@@ -414,6 +417,7 @@ class RunService : LifecycleService() {
     companion object {
         private const val NOTIFICATION_ID = 7
         private const val COUNTDOWN_SEC = 5
+        private const val COUNTDOWN_WORDS = "Five. Four. Three. Two. One."
         private const val CHECKPOINT_MS = 15_000L
         /** Step label prefix while counting down; the watch matches on it. */
         const val STARTING_IN = "Starting in "

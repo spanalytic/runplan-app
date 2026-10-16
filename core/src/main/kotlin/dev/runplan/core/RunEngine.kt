@@ -127,6 +127,8 @@ sealed interface Cue {
         val step: RunStep, val index: Int, val count: Int, val next: RunStep?, val prev: StepResult?,
         /** The step before was a [StepKind.READY] countdown that already announced this one. */
         val afterCountdown: Boolean = false,
+        /** The step before was a recovery jog, whose result isn't read out. */
+        val prevRecovery: Boolean = false,
     ) : Cue
     /** "10 seconds" / "200 metres to go", announcing what comes next. */
     data class Countdown(val left: String, val next: RunStep?) : Cue
@@ -152,7 +154,7 @@ sealed interface Cue {
         is StepStart -> when {
             step.runWalk -> runWalkStart(this)
             step.kind == StepKind.READY ->
-                "Get ready." + (next?.let { " ${it.label} in ${spokenDuration(step.secs ?: 10.0)}: ${spokenStep(it)}." } ?: "")
+                "Get ready." + (next?.let { " ${spokenLabel(it)} in ${spokenDuration(step.secs ?: 10.0)}: ${spokenStep(it)}." } ?: "")
             afterCountdown -> "Go!"
             step.hill && step.isOpen && step.label == RunStep.TO_HILL ->
                 "Jog to the bottom of your hill and tap Next when you're there." + (prev?.let { " " + spokenResult(it) } ?: "")
@@ -160,10 +162,13 @@ sealed interface Cue {
                 if (next?.kind == StepKind.READY) "Jog back down. Tap Next when you're at the bottom."
                 else "That was the last one. Jog back down and tap Next for the cool-down."
             step.hill && step.kind == StepKind.RECOVERY -> "Rest." + (prev?.let { " " + spokenResult(it) } ?: "")
+            // a recovery jog needs no time or pace: just how the rep went
+            step.kind == StepKind.RECOVERY -> "Recover." + (prev?.let { " " + spokenResult(it) } ?: "")
             else -> buildString {
                 append(if (index == 0) "Let's go." else opener(step)).append(' ')
-                append(step.label).append(": ").append(spokenStep(step)).append('.')
-                prev?.let { append(' ').append(spokenResult(it)) }
+                append(spokenLabel(step)).append(": ").append(spokenStep(step)).append('.')
+                // nothing about the recovery jog just finished
+                if (!prevRecovery) prev?.let { append(' ').append(spokenResult(it)) }
             }
         }
         // the 10 s rest at the top of a hill rep needs no announcing
@@ -171,13 +176,16 @@ sealed interface Cue {
             next.walk && next.kind == StepKind.COOLDOWN -> " Then cool down with a walk."
             next.walk -> " Then walk."
             else -> " Then run for ${spokenDuration(next.secs ?: 0.0)}."
-        } else if (next != null && !(next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) " Next: ${next.label}, ${spokenStep(next)}." else ""
+        } else if (next == null || (next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) ""
+        else if (next.kind == StepKind.RECOVERY && !next.hill) " Then recover."
+        // what comes next by name only; its start cue gives the detail
+        else " Next: ${spokenLabel(next).replaceFirstChar { it.lowercase() }}."
         is Remaining -> text
         is Halfway -> if (step.runWalk) "Halfway. Keep it steady and easy." else "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
             (verdict(pace, step.fast, step.slow)?.let { ", $it" } ?: "") + "."
         is PaceAlert -> when {
             step.capOnly -> "Ease off. Pace ${spokenPace(pace)}, keep it slower than ${spokenPace(step.fast)}."
-            else -> (if (tooSlow) "Speed up. " else "Slow down a little. ") +
+            else -> (if (tooSlow) "Speed up. " else "Slow down. ") +
                 "Pace ${spokenPace(pace)}, target ${spokenPace((step.fast + step.slow) / 2)}."
         }
         is Split -> "Kilometre $km. ${spokenPace(secPerKm)} per kilometre."
@@ -204,6 +212,9 @@ sealed interface Cue {
                 else -> "Run for $amt, nice and easy." + if (st.lastRun) " Last one!" else ""
             }
         }
+
+        /** The step's name without its count: "Rep 2 of 3" is spoken as "Rep". */
+        fun spokenLabel(st: RunStep): String = st.label.replace(Regex(" \\d+ of \\d+$"), "")
 
         private fun opener(st: RunStep): String = when (st.kind) {
             StepKind.WARMUP -> "Let's go."
@@ -372,7 +383,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     private var lastAlertMs = -1_000_000L
     private var alertsThisStep = 0
     private val said = HashSet<String>()
-    private val recent = ArrayDeque<Pair<Long, Double>>()   // (elapsed ms, distance) for the last 30 s
+    private val recent = ArrayDeque<Pair<Long, Double>>()   // (elapsed ms, distance) for the last 50 s
     private var nextSplitKm = 1
     private var lastSplitMs = 0L
     val results = ArrayList<StepResult>()
@@ -396,15 +407,33 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     fun lapPace(): Double = if (stepSec() >= 10 && stepM() >= 20) stepSec() / (stepM() / 1000) else Double.NaN
 
     /**
-     * Pace used for on/off-target decisions: distance over the last 20 s (or since the step
+     * Pace used for on/off-target display: distance over the last 20 s (or since the step
      * started), which is far steadier than the second-by-second display.
      */
-    private fun steadyPace(): Double {
-        val since = maxOf(stepStartMs, elapsedMs - 20_000)
-        val start = recent.firstOrNull { it.first >= since } ?: return pace
+    private fun steadyPace(): Double = paceOver(20_000, 12.0, 15.0).takeIf(Double::isFinite) ?: pace
+
+    /** Pace for spoken alerts: over a longer window, so GPS wobble and corners don't trigger them. NaN until there is enough. */
+    private fun alertPace(): Double = paceOver(ALERT_WINDOW_MS, ALERT_WINDOW_MS / 2000.0, 40.0)
+
+    /** Distance over the last [windowMs] (or since the step started); NaN with less than [minSec] or [minM]. */
+    private fun paceOver(windowMs: Long, minSec: Double, minM: Double): Double {
+        val since = maxOf(stepStartMs, elapsedMs - windowMs)
+        val start = recent.firstOrNull { it.first >= since } ?: return Double.NaN
         val sec = (elapsedMs - start.first) / 1000.0
         val m = distanceM - start.second
-        return if (sec >= 12 && m >= 15) sec / (m / 1000) else pace
+        return if (sec >= minSec && m >= minM) sec / (m / 1000) else Double.NaN
+    }
+
+    /** Off target by enough to say so: [ALERT_MARGIN] s/km past the band (or the easy limit), on [alertPace]. */
+    private fun alertStatus(): PaceStatus {
+        val st = current
+        val p = alertPace()
+        if (!st.hasTarget || !p.isFinite()) return PaceStatus.NONE
+        return when {
+            st.slow.isFinite() && p > st.slow + ALERT_MARGIN -> PaceStatus.SLOW
+            p < st.fast - ALERT_MARGIN -> PaceStatus.FAST
+            else -> PaceStatus.IN_BAND
+        }
     }
 
     fun status(): PaceStatus {
@@ -429,7 +458,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         this.distanceM = distanceM
         this.pace = pace
         recent.addLast(elapsedMs to distanceM)
-        while (recent.size > 2 && elapsedMs - recent.first().first > 30_000) recent.removeFirst()
+        while (recent.size > 2 && elapsedMs - recent.first().first > ALERT_WINDOW_MS + 5_000) recent.removeFirst()
         val cues = ArrayList<Cue>()
 
         // km splits (only on longer continuous steps, so reps aren't cluttered)
@@ -459,7 +488,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             st.metres != null && st.metres >= 1000 -> stepM() >= st.metres / 2
             else -> false
         }
-        if (half && !st.walk && said.add("half")) {
+        if (half && !st.walk && st.kind != StepKind.RECOVERY && said.add("half")) {
             val sofar = if (stepM() >= 20) stepSec() / (stepM() / 1000) else Double.NaN
             if (sofar.isFinite()) cues += Cue.Halfway(sofar, st)
         }
@@ -472,16 +501,17 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         if (st.metres != null && st.metres >= (if (last) 500.0 else 1000.0) && rem <= 200 && said.add("200"))
             cues += if (last) Cue.Remaining("200 metres left in the workout.") else Cue.Countdown("200 metres to go.", next)
 
-        // pace alerts: settle 30 s into a step, 8 s out of band, then at most every 30 s.
+        // pace alerts, only when well off target for a while: settle into the step, then
+        // [ALERT_SUSTAIN_MS] continuously off target, then at most every [ALERT_GAP_MS].
         // Easy-limit alerts back off (1, 2, then 3 minutes apart) so they don't nag.
-        val s = status()
+        val s = alertStatus()
         val alertable = st.hasTarget && st.kind == StepKind.INTERVAL &&
-            stepSec() >= 30 && (st.zone != Zone.E || s == PaceStatus.FAST)
+            stepSec() * 1000 >= ALERT_SETTLE_MS && (st.zone != Zone.E || s == PaceStatus.FAST)
         if (alertable && (s == PaceStatus.SLOW || s == PaceStatus.FAST)) {
             if (outSinceMs < 0) outSinceMs = elapsedMs
-            val gap = if (st.capOnly) 60_000L * alertsThisStep.coerceIn(1, 3) else 30_000L
-            if (elapsedMs - outSinceMs >= 8_000 && elapsedMs - lastAlertMs >= gap) {
-                cues += Cue.PaceAlert(s == PaceStatus.SLOW, steadyPace(), st)
+            val gap = if (st.capOnly) 60_000L * alertsThisStep.coerceIn(1, 3) else ALERT_GAP_MS
+            if (elapsedMs - outSinceMs >= ALERT_SUSTAIN_MS && elapsedMs - lastAlertMs >= gap) {
+                cues += Cue.PaceAlert(s == PaceStatus.SLOW, alertPace(), st)
                 lastAlertMs = elapsedMs
                 alertsThisStep++
             }
@@ -507,8 +537,22 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             listOf(finishedCue(done))
         } else {
             index++
-            listOf(Cue.StepStart(current, index, steps.size, steps.getOrNull(index + 1), done, afterCountdown = steps[index - 1].kind == StepKind.READY))
+            val before = steps[index - 1]
+            listOf(Cue.StepStart(
+                current, index, steps.size, steps.getOrNull(index + 1), done,
+                afterCountdown = before.kind == StepKind.READY,
+                prevRecovery = before.kind == StepKind.RECOVERY,
+            ))
         }
+    }
+
+    companion object {
+        /** Spoken pace alerts: how far past the target (s/km), over what window, for how long, how often. */
+        const val ALERT_MARGIN = 15.0
+        const val ALERT_WINDOW_MS = 45_000L
+        const val ALERT_SETTLE_MS = 45_000L
+        const val ALERT_SUSTAIN_MS = 20_000L
+        const val ALERT_GAP_MS = 90_000L
     }
 
     /** Step results so far, including the step in progress, without ending it (for saving progress mid-run). */
