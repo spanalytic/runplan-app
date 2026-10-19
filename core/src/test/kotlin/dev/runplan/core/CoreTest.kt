@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
+import kotlin.math.abs
 
 class CoreTest {
     private fun day(s: String) = LocalDate.parse(s).toEpochDay()
@@ -645,5 +646,26 @@ class CoreTest {
         assertTrue("Halfway. Keep it steady and easy." in ls, ls.joinToString("\n"))
         assertTrue("That's all the running done. Cool down by walking for 5 minutes." in ls, ls.joinToString("\n"))
         assertTrue(ls.none { it.contains("Last one") })
+    }
+
+    @Test fun paceChartIsSmoothedOverThirtySeconds() {
+        // 3 m/s, with a 4 s burst at 5 m/s every 20 s; then a 60 s pause; then 2 m/s
+        val pts = ArrayList<TrackPoint>()
+        var x = 0.0
+        for (i in 0 until 300) {
+            x += if (i % 20 < 4) 5.0 else 3.0
+            pts += TrackPoint(i * 1000L, 53.3, -1.14, 0.0, 4f, dist = x)
+        }
+        for (i in 360 until 600) {
+            x += 2.0
+            pts += TrackPoint(i * 1000L, 53.3, -1.14, 0.0, 4f, dist = x)
+        }
+        val s = Analytics.paceSeries(pts, maxPoints = 10_000)
+        val steady = s.filter { it.first in 30.0..270.0 }.map { it.second }
+        // the bursts average out to 283-306 s/km instead of swinging to 200 s/km
+        assertTrue(steady.all { it in 275.0..310.0 }, steady.toString())
+        // the pause doesn't drag the pace down on either side of it
+        assertTrue(s.first { it.first == 299.0 }.second < 340, s.first { it.first == 299.0 }.toString())
+        assertTrue(abs(s.first { it.first == 360.0 }.second - 500.0) < 1, s.first { it.first == 360.0 }.toString())
     }
 }

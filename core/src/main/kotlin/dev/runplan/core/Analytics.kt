@@ -150,17 +150,32 @@ object Analytics {
     const val BARO_WINDOW_M = 50.0
     const val BARO_STEP_M = 2.0
 
-    /** (seconds, pace s/km) every point, from the smoothed speed; NaN pace where stopped. */
+    /**
+     * (seconds, pace s/km) for the pace chart: distance covered over [PACE_WINDOW_SEC] centred on each
+     * point, so the chart shows the trend rather than every few-second change. A gap of more than
+     * [PACE_GAP_SEC] (a pause) splits the window. NaN pace where stopped.
+     */
     fun paceSeries(points: List<TrackPoint>, maxPoints: Int = 400): List<Pair<Double, Double>> {
         if (points.size < 2) return emptyList()
         val t0 = points.first().tMs
         val step = max(1, points.size / maxPoints)
+        val half = PACE_WINDOW_SEC * 500
         return points.indices.step(step).map { i ->
             val p = points[i]
-            val s = if (p.fSpeed.isFinite()) p.fSpeed else p.speed.toDouble()
+            var lo = i
+            while (lo > 0 && p.tMs - points[lo - 1].tMs <= half && points[lo].tMs - points[lo - 1].tMs <= PACE_GAP_SEC * 1000) lo--
+            var hi = i
+            while (hi < points.size - 1 && points[hi + 1].tMs - p.tMs <= half && points[hi + 1].tMs - points[hi].tMs <= PACE_GAP_SEC * 1000) hi++
+            val sec = (points[hi].tMs - points[lo].tMs) / 1000.0
+            val metres = points[hi].dist - points[lo].dist
+            val s = if (sec >= 5 && metres.isFinite()) metres / sec
+                else if (p.fSpeed.isFinite()) p.fSpeed else p.speed.toDouble()
             (p.tMs - t0) / 1000.0 to if (s.isFinite() && s > 0.5) 1000 / s else Double.NaN
         }
     }
+
+    const val PACE_WINDOW_SEC = 30L
+    const val PACE_GAP_SEC = 5L
 
     /** (km, metres above or below the start) smoothed. */
     fun elevationSeries(points: List<TrackPoint>, maxPoints: Int = 300): List<Pair<Double, Double>> {
