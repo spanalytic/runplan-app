@@ -302,8 +302,8 @@ fun SplitBars(splits: List<Double>, colorFor: (Double) -> Color) {
                 Text("${i + 1}", style = MaterialTheme.typography.labelMedium, color = Palette.Slate, modifier = Modifier.width(28.dp))
                 Box(Modifier.weight(1f).height(12.dp)) {
                     if (sec.isFinite() && sec > 0) {
-                        // scale between 35% (slowest) and 100% (fastest)
-                        val f = if (slowest - fastest < 1) 1f else (0.35 + 0.65 * (slowest - sec) / (slowest - fastest)).toFloat()
+                        // a bar is the split's time: 35% (fastest) to 100% (slowest)
+                        val f = if (slowest - fastest < 1) 1f else (0.35 + 0.65 * (sec - fastest) / (slowest - fastest)).toFloat()
                         Box(Modifier.fillMaxWidth(f).height(12.dp).clip(RoundedCornerShape(4.dp)).background(colorFor(sec)))
                     }
                 }

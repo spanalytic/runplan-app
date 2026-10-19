@@ -648,7 +648,7 @@ class CoreTest {
         assertTrue(ls.none { it.contains("Last one") })
     }
 
-    @Test fun paceChartIsSmoothedOverThirtySeconds() {
+    @Test fun paceChartIsSmoothedOverAMinute() {
         // 3 m/s, with a 4 s burst at 5 m/s every 20 s; then a 60 s pause; then 2 m/s
         val pts = ArrayList<TrackPoint>()
         var x = 0.0

@@ -174,7 +174,7 @@ object Analytics {
         }
     }
 
-    const val PACE_WINDOW_SEC = 30L
+    const val PACE_WINDOW_SEC = 60L
     const val PACE_GAP_SEC = 5L
 
     /** (km, metres above or below the start) smoothed. */

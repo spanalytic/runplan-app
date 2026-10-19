@@ -137,6 +137,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
                     colorAt = { i -> Palette.zone(plan?.paces?.let { PaceZones.of(paceData[i].second, it) } ?: Zone.E) },
                     invertY = true,
                     robust = true,
+                    minSpan = 240.0,   // at least 4 min/km top to bottom, so small changes look small
                     yTicks = listOf(15.0, 30.0, 60.0, 120.0, 300.0),
                     yFormat = { Fmt.pace(it) },
                     xFormat = { "${(it / 60).toInt()} min" },
@@ -202,7 +203,7 @@ fun SummaryScreen(id: String, onBack: () -> Unit, openMap: (String) -> Unit) {
             if (r.splits.isNotEmpty()) {
                 Spacer(Modifier.height(28.dp))
                 Text("Kilometre splits", style = MaterialTheme.typography.headlineSmall)
-                Text("Longer bar is faster; the dot marks your fastest.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
+                Text("Shorter bar is faster; the dot marks your fastest.", style = MaterialTheme.typography.bodySmall, color = Palette.Slate)
                 Spacer(Modifier.height(10.dp))
                 SplitBars(r.splits) { sec -> Palette.zone(plan?.paces?.let { PaceZones.of(sec, it) } ?: Zone.E) }
             }
