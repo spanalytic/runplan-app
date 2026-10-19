@@ -129,13 +129,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
         item {
             TodayBlock(p, today, state.done, p.on(today)?.let(ran), open, startRun, buildWorkout)
         }
-        for (week in currentWeek..p.weeks) {
-            val ws = byWeek[week] ?: continue
-            item(key = "h$week") { WeekHeader(p, week, ws) }
-            items(ws, key = { it.id }) { w ->
-                SessionRow(p, w, w.id in state.done, ran(w), w.epochDay == today, onLongClick = { moving = w.id }.takeIf { movable(w) }) { open(w.id) }
-            }
-        }
+        // earlier weeks open above the current one, in date order
         if (currentWeek > 1) {
             item {
                 TextButton(onClick = { showEarlier = !showEarlier }, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -146,6 +140,13 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
                 val ws = byWeek[week] ?: continue
                 item(key = "h$week") { WeekHeader(p, week, ws) }
                 items(ws, key = { it.id }) { w -> SessionRow(p, w, w.id in state.done, ran(w), false) { open(w.id) } }
+            }
+        }
+        for (week in currentWeek..p.weeks) {
+            val ws = byWeek[week] ?: continue
+            item(key = "h$week") { WeekHeader(p, week, ws) }
+            items(ws, key = { it.id }) { w ->
+                SessionRow(p, w, w.id in state.done, ran(w), w.epochDay == today, onLongClick = { moving = w.id }.takeIf { movable(w) }) { open(w.id) }
             }
         }
     }
