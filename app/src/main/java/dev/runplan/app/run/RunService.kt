@@ -270,6 +270,10 @@ class RunService : LifecycleService() {
                 else -> true
             }
             if (speak) speaker.speak(c.speech())
+            // Keep the podcast ducked from the 10 s warning until the next step's cue has been
+            // spoken: ducking it again at the step change clipped the start of that cue.
+            if (s.voice && c is Cue.Countdown) speaker.hold()
+            if (c is Cue.StepStart || c is Cue.Finished) speaker.unhold()
             if (c is Cue.StepStart) {
                 stepStarts += SystemClock.elapsedRealtime()
                 buzz(longArrayOf(0, 120, 80, 120))

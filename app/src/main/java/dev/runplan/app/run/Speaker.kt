@@ -76,6 +76,7 @@ class Speaker(context: Context) {
         if (interrupt) {
             tts.stop()
             pending.set(0)
+            held = false   // the hold's count went with the reset
         }
         val idle = pending.get() == 0
         pending.incrementAndGet()

@@ -136,8 +136,8 @@ class CoreTest {
             eng.update(t, d, pace).forEach { spoken += it.speech() }
         }
         val all = spoken.joinToString("\n")
-        // short: no "1 of 6", the next step by name only, nothing about the recovery jogs
-        assertTrue(spoken.any { it == "10 seconds left. Next: rep." }, all)
+        // short: no "1 of 6", nothing about the recovery jogs; the warning gives the rep's details
+        assertTrue(spoken.any { it == "10 seconds left. Next: rep, 1 minute at 4 49 per kilometre." }, all)
         assertTrue(spoken.any { it == "10 seconds left. Then recover." }, all)
         assertTrue(spoken.none { it.contains(" of 6") || it.contains("jog") }, all)
         assertTrue(spoken.any { it.startsWith("Go! Rep: ") && it.contains("Last lap: ") }, all)   // after the warm-up
@@ -207,6 +207,10 @@ class CoreTest {
         val alerts = simulate(RunEngine("t", listOf(rep))) { 345.0 }.filter { it.second is Cue.PaceAlert }
         assertTrue(alerts.first().first >= RunEngine.ALERT_SETTLE_MS, alerts.toString())
         assertEquals(listOf(90_000L), alerts.zipWithNext { a, b -> b.first - a.first }.distinct())
+        // none just before the step ends, where it would hold up the next cue
+        val late = RunStep("Rep 1 of 3", StepKind.INTERVAL, 300.0, null, Zone.T, 371.0, 381.0, 376.0)
+        val lateAlerts = simulate(RunEngine("t", listOf(late))) { if (it.elapsedMs < 240_000) 376.0 else 330.0 }.filter { it.second is Cue.PaceAlert }
+        assertTrue(lateAlerts.none { it.first > 285_000 }, lateAlerts.toString())
         assertEquals("Slow down. Pace 5 45, target 6 16.", alerts.first().second.speech())
         val slow = simulate(RunEngine("t", listOf(rep))) { 420.0 }.first { it.second is Cue.PaceAlert }.second.speech()
         assertEquals("Speed up. Pace 7 flat, target 6 16.", slow)
@@ -388,7 +392,7 @@ class CoreTest {
             val rest = spoken.indexOfFirst { it.startsWith("Rest. Last lap:") }
             assertTrue(rest > ready + 4 && spoken.subList(ready + 5, rest).all { it == "10 seconds left." }, all)
             assertEquals("Jog back down. Tap Next when you're at the bottom.", spoken[rest + 1])
-            assertTrue(spoken.any { it == "10 seconds left. Next: to the hill." }, all)
+            assertTrue(spoken.any { it == "10 seconds left. Next: to the hill, jog to the bottom of your hill." }, all)
             assertTrue(spoken.single { it.startsWith("Last one. Cool-down") }.let { !it.contains("Last lap") }, all)
             assertTrue(spoken.none { it.contains("Next: Rest") || it.contains("Run as you like") }, all)
             assertEquals(1, spoken.count { it.startsWith("That was the last one.") }, all)

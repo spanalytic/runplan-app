@@ -178,8 +178,7 @@ sealed interface Cue {
             else -> " Then run for ${spokenDuration(next.secs ?: 0.0)}."
         } else if (next == null || (next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) ""
         else if (next.kind == StepKind.RECOVERY && !next.hill) " Then recover."
-        // what comes next by name only; its start cue gives the detail
-        else " Next: ${spokenLabel(next).replaceFirstChar { it.lowercase() }}."
+        else " Next: ${spokenLabel(next).replaceFirstChar { it.lowercase() }}, ${spokenStep(next)}."
         is Remaining -> text
         is Halfway -> if (step.runWalk) "Halfway. Keep it steady and easy." else "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
             (verdict(pace, step.fast, step.slow)?.let { ", $it" } ?: "") + "."
@@ -506,7 +505,9 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         // Easy-limit alerts back off (1, 2, then 3 minutes apart) so they don't nag.
         val s = alertStatus()
         val alertable = st.hasTarget && st.kind == StepKind.INTERVAL &&
-            stepSec() * 1000 >= ALERT_SETTLE_MS && (st.zone != Zone.E || s == PaceStatus.FAST)
+            stepSec() * 1000 >= ALERT_SETTLE_MS && (st.zone != Zone.E || s == PaceStatus.FAST) &&
+            // not in the last moments of a step: it would hold up the next step's cue
+            !(rem <= (if (st.metres != null) 50.0 else 15.0))
         if (alertable && (s == PaceStatus.SLOW || s == PaceStatus.FAST)) {
             if (outSinceMs < 0) outSinceMs = elapsedMs
             val gap = if (st.capOnly) 60_000L * alertsThisStep.coerceIn(1, 3) else ALERT_GAP_MS
