@@ -336,10 +336,21 @@ private fun Fitness(runs: List<RunRecord>, plan: Plan?, today: Long) {
     val points = remember(runs) {
         runs.mapNotNull { r -> Analytics.fitness(r.efforts.orEmpty())?.let { Dated(it, r) } }.sortedBy { it.run.epochDay }
     }
-    Section("Fitness", "Your predicted $goalName time, from your best effort of a mile or more in the last 6 weeks")
+    // training runs aren't all-out, so an early prediction reads slower than the runner really is
+    val early = today - runs.minOf { it.epochDay } < 42
+    Section("Fitness", if (early) null else "Your predicted $goalName time, from your best effort of a mile or more in the last 6 weeks")
     val recent = points.filter { it.run.epochDay > today - 42 }.maxByOrNull { it.effort.vdot }
     // a beginner plan's paces are a placeholder, not something to compare with
     val planScore = plan?.takeIf { !it.profile.beginner }?.paces?.vdot
+    if (early) {
+        planScore?.let { Text(Fmt.duration(predicted(it)), style = MaterialTheme.typography.displayMedium) }
+        Text(
+            (if (planScore != null) "Your plan's paces are set for this $goalName time. " else "") +
+                "After 6 weeks of runs, your predicted time from your own runs shows here.",
+            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+        )
+        return
+    }
     if (recent == null) {
         Text(
             "Run something hard over a mile or more, like a race, time trial or parkrun, and your predicted race time shows here.",
