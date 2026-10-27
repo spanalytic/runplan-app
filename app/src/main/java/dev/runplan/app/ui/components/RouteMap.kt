@@ -1,6 +1,8 @@
 package dev.runplan.app.ui.components
 
+import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Point
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -25,6 +27,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import dev.runplan.app.ui.theme.Palette
 import dev.runplan.core.Paces
 import dev.runplan.core.PaceZones
+import dev.runplan.core.RouteLine
 import dev.runplan.core.TrackPoint
 import dev.runplan.core.Zone
 import android.graphics.ColorMatrix
@@ -35,8 +38,8 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.CopyrightOverlay
+import org.osmdroid.views.overlay.Overlay
 import org.osmdroid.views.overlay.Polygon
-import org.osmdroid.views.overlay.Polyline
 import kotlin.math.cos
 
 /**
@@ -62,20 +65,67 @@ fun downsample(points: List<TrackPoint>, max: Int): List<TrackPoint> {
     return (0 until max).map { points[(it * step).toInt()] } + points.last()
 }
 
-/** Splits the track into runs of the same pace zone, so each can be drawn in that zone's colour. */
-private fun segments(points: List<TrackPoint>, paces: Paces?): List<Pair<Zone?, List<GeoPoint>>> {
-    val out = ArrayList<Pair<Zone?, MutableList<GeoPoint>>>()
-    for (p in points) {
-        val pace = if (p.fSpeed.isFinite() && p.fSpeed > 0.5) 1000 / p.fSpeed else Double.NaN
-        val z = paces?.let { PaceZones.of(pace, it) } ?: if (pace.isFinite()) Zone.E else null
-        val g = GeoPoint(p.bestLat, p.bestLon)
-        val last = out.lastOrNull()
-        if (last != null && last.first == z) last.second += g
-        else {
-            last?.second?.lastOrNull()?.let { prev -> out += z to mutableListOf(prev, g) } ?: run { out += z to mutableListOf(g) }
+/** The colour of each point: the training zone of the pace there. */
+private fun zoneColours(points: List<TrackPoint>, paces: Paces?): IntArray = IntArray(points.size) { i ->
+    val p = points[i]
+    val pace = if (p.fSpeed.isFinite() && p.fSpeed > 0.5) 1000 / p.fSpeed else Double.NaN
+    val z = paces?.let { PaceZones.of(pace, it) } ?: if (pace.isFinite()) Zone.E else null
+    Palette.zone(z).toArgb()
+}
+
+/**
+ * The route as a thin line coloured by pace zone, each pass shifted a little to the right of its
+ * direction of travel (so an out-and-back shows both ways side by side), with small arrowheads
+ * showing the direction. Worked out in screen pixels on every draw, so it holds at any zoom.
+ */
+private class RouteOverlay(private val geo: List<GeoPoint>, private val colours: IntArray, private val density: Float) : Overlay() {
+    private val line = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+    }
+    private val head = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val path = android.graphics.Path()
+    private val pt = Point()
+
+    override fun draw(c: Canvas, map: MapView, shadow: Boolean) {
+        if (shadow || geo.size < 2) return
+        val pj = map.projection
+        val n = geo.size
+        val xs = FloatArray(n)
+        val ys = FloatArray(n)
+        for (i in 0 until n) {
+            pj.toPixels(geo[i], pt)
+            xs[i] = pt.x.toFloat(); ys[i] = pt.y.toFloat()
+        }
+        val span = 10f * density
+        val (ox, oy) = RouteLine.offset(xs, ys, 1.75f * density, span)
+        var i = 0
+        while (i < n - 1) {
+            val colour = colours[i + 1]
+            path.reset()
+            path.moveTo(ox[i], oy[i])
+            var j = i + 1
+            path.lineTo(ox[j], oy[j])
+            while (j < n - 1 && colours[j + 1] == colour) { j++; path.lineTo(ox[j], oy[j]) }
+            line.color = colour
+            c.drawPath(path, line)
+            i = j
+        }
+        val len = 5f * density
+        val half = 3.5f * density
+        for (a in RouteLine.arrows(ox, oy, 80f * density, span)) {
+            // a small arrowhead pointing the way you ran, a little wider than the line
+            path.reset()
+            path.moveTo(a.x + a.dx * len, a.y + a.dy * len)
+            path.lineTo(a.x - a.dy * half, a.y + a.dx * half)
+            path.lineTo(a.x + a.dy * half, a.y - a.dx * half)
+            path.close()
+            head.color = colours[a.index]
+            c.drawPath(path, head)
         }
     }
-    return out
 }
 
 /**
@@ -119,21 +169,11 @@ fun RouteMap(points: List<TrackPoint>, paces: Paces?, modifier: Modifier = Modif
         factory = { map },
         modifier = modifier.fillMaxWidth().height(height),
         update = { m ->
-            m.overlays.removeAll { it is Polyline || it is Polygon }
+            m.overlays.removeAll { it is RouteOverlay || it is Polygon }
             if (points.size < 2) return@AndroidView
             val density = m.resources.displayMetrics.density
-            for ((zone, geo) in segments(downsample(points, 1500), paces)) {
-                if (geo.size < 2) continue
-                m.overlays.add(Polyline(m).apply {
-                    setPoints(geo)
-                    infoWindow = null
-                    outlinePaint.color = Palette.zone(zone).toArgb()
-                    outlinePaint.strokeWidth = 5f * density
-                    outlinePaint.strokeCap = Paint.Cap.ROUND
-                    outlinePaint.strokeJoin = Paint.Join.ROUND
-                    outlinePaint.isAntiAlias = true
-                })
-            }
+            val shown = downsample(points, 1500)
+            m.overlays.add(RouteOverlay(shown.map { GeoPoint(it.bestLat, it.bestLon) }, zoneColours(shown, paces), density))
             val start = GeoPoint(points.first().bestLat, points.first().bestLon)
             val end = GeoPoint(points.last().bestLat, points.last().bestLon)
             fun dot(at: GeoPoint, fill: Color) = Polygon(m).apply {

@@ -672,4 +672,23 @@ class CoreTest {
         assertTrue(s.first { it.first == 299.0 }.second < 340, s.first { it.first == 299.0 }.toString())
         assertTrue(abs(s.first { it.first == 360.0 }.second - 500.0) < 1, s.first { it.first == 360.0 }.toString())
     }
+
+    @Test fun outAndBackIsDrawnSideBySideWithArrows() {
+        // east along y = 100 for 200 px, a small turn, then back west along the same line, with jitter
+        val rnd = java.util.Random(3)
+        val xs = ArrayList<Float>(); val ys = ArrayList<Float>()
+        for (i in 0..100) { xs += 2f * i; ys += 100f + rnd.nextGaussian().toFloat() * 0.3f }
+        for (i in 100 downTo 0) { xs += 2f * i; ys += 100f + rnd.nextGaussian().toFloat() * 0.3f }
+        val (ox, oy) = RouteLine.offset(xs.toFloatArray(), ys.toFloatArray(), 2f, 12f)
+        // going east the line sits below the road (to the runner's right), coming back west it sits above
+        for (i in 10..90) assertTrue(abs(oy[i] - ys[i] - 2f) < 0.6f, "out $i: ${oy[i] - ys[i]}")
+        for (i in 111..191) assertTrue(abs(oy[i] - ys[i] + 2f) < 0.6f, "back $i: ${oy[i] - ys[i]}")
+        val arrows = RouteLine.arrows(xs.toFloatArray(), ys.toFloatArray(), 100f, 12f)
+        assertEquals(4, arrows.size)
+        assertTrue(arrows[0].dx > 0.9f && arrows[3].dx < -0.9f, arrows.toString())
+        assertTrue(abs(arrows[0].x - 50f) < 1f, arrows.toString())
+        // a stop at the start doesn't leave those points without a direction
+        val (dx, _) = RouteLine.directions(floatArrayOf(0f, 0f, 0f, 10f, 20f, 30f), FloatArray(6), 5f)
+        assertTrue(dx.all { it > 0.9f }, dx.toList().toString())
+    }
 }
