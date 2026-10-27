@@ -137,14 +137,16 @@ class CoreTest {
         }
         val all = spoken.joinToString("\n")
         // short: no "1 of 6", nothing about the recovery jogs; the warning gives the rep's details
-        assertTrue(spoken.any { it == "10 seconds left. Next: rep, 1 minute at 4 49 per kilometre." }, all)
-        assertTrue(spoken.any { it == "10 seconds left. Then recover." }, all)
+        assertTrue(spoken.any { it == "10 seconds left. Next rep is 1 minute at 4 49 per kilometre." }, all)
+        assertTrue(spoken.any { it == "10 seconds left, then recover for 2 minutes." }, all)
         assertTrue(spoken.none { it.contains(" of 6") || it.contains("jog") }, all)
-        assertTrue(spoken.any { it.startsWith("Go! Rep: ") && it.contains("Last lap: ") }, all)   // after the warm-up
-        assertTrue(spoken.filter { it.startsWith("Go! Rep: ") }.drop(1).none { it.contains("Last lap") }, all)
-        assertTrue(spoken.any { it.startsWith("Recover. Last lap: ") && it.contains("per kilometre") }, all)
-        assertTrue(spoken.single { it.startsWith("Last one. Cool-down") }.let { !it.contains("Last lap") }, all)
-        assertTrue(spoken.any { it.startsWith("Halfway. Pace so far") })
+        assertTrue(spoken.any { it.startsWith("Go! 1 minute at 4 49 per kilometre.") && it.contains("That lap was ") }, all)   // after the warm-up
+        assertTrue(spoken.filter { it.startsWith("Go! ") }.drop(1).none { it.contains("That lap") }, all)
+        assertTrue(spoken.any { it.startsWith("Recover for 2 minutes. That lap was ") && it.contains("per kilometre") }, all)
+        assertTrue(spoken.single { it.startsWith("Last one. Cool down for") }.let { !it.contains("That lap") }, all)
+        assertTrue(spoken.any { it.startsWith("Halfway. You're averaging") })
+        // whole sentences: no colons or bare labels that make the voice stop mid-phrase
+        assertTrue(spoken.none { ':' in it || it.contains("Next:") || it.contains("Rep ") }, all)
         assertTrue(spoken.none { it.contains(" to ") && it.contains("per kilometre") && it.startsWith("Go!") }, "targets are spoken as one pace")
     }
 
@@ -194,7 +196,7 @@ class CoreTest {
         val gaps = alerts.zipWithNext { a, b -> b - a }
         assertEquals(listOf(60L, 120L, 180L), gaps.take(3))
         assertEquals(false, eng.results.single().hit)
-        assertTrue(simulate(RunEngine("x", listOf(st))) { 380.0 }.first { it.second is Cue.PaceAlert }.second.speech().startsWith("Ease off."))
+        assertTrue(simulate(RunEngine("x", listOf(st))) { 380.0 }.first { it.second is Cue.PaceAlert }.second.speech().startsWith("Ease off, you're at "))
     }
 
     @Test fun paceAlertsOnlyWhenWellOffTargetForAWhile() {
@@ -211,9 +213,9 @@ class CoreTest {
         val late = RunStep("Rep 1 of 3", StepKind.INTERVAL, 300.0, null, Zone.T, 371.0, 381.0, 376.0)
         val lateAlerts = simulate(RunEngine("t", listOf(late))) { if (it.elapsedMs < 240_000) 376.0 else 330.0 }.filter { it.second is Cue.PaceAlert }
         assertTrue(lateAlerts.none { it.first > 285_000 }, lateAlerts.toString())
-        assertEquals("Slow down. Pace 5 45, target 6 16.", alerts.first().second.speech())
+        assertEquals("Slow down, you're at 5 45 and the target is 6 16.", alerts.first().second.speech())
         val slow = simulate(RunEngine("t", listOf(rep))) { 420.0 }.first { it.second is Cue.PaceAlert }.second.speech()
-        assertEquals("Speed up. Pace 7 flat, target 6 16.", slow)
+        assertEquals("Speed up, you're at 7 flat and the target is 6 16.", slow)
     }
 
     @Test fun resultsSoFarIncludeTheStepInProgressWithoutEndingIt() {
@@ -247,7 +249,7 @@ class CoreTest {
     @Test fun lastStepAnnouncesEndOfWorkout() {
         val eng = RunEngine("Easy run", RunStep.flatten(easyRun(), easyPaces))
         val spoken = simulate(eng) { 431.0 }.map { it.second.speech() }
-        assertTrue(spoken.first().startsWith("Let's go. Easy: 4.5 kilometres, no faster than 6 43 per kilometre"), spoken.first())
+        assertTrue(spoken.first().startsWith("Let's go. Easy running for 4.5 kilometres, no faster than 6 43 per kilometre."), spoken.first())
         assertTrue("200 metres left in the workout." in spoken, spoken.joinToString("\n"))
         assertTrue(spoken.none { it.startsWith("200 metres to go") })
 
@@ -273,23 +275,23 @@ class CoreTest {
         val one = simulate(RunEngine("Easy run", RunStep.flatten(easyRun(), easyPaces))) { 431.0 }.last().second
         val s1 = one.speech()
         assertTrue(one is Cue.Finished)
-        assertTrue(s1.startsWith("Workout complete, good job. Workout summary: 4.5 kilometres in 32 minutes 20 seconds, average 7 11 per kilometre."), s1)
-        assertTrue(s1.endsWith("1 of 1 paced step on target."), s1)
-        assertTrue("Last lap" !in s1)
+        assertTrue(s1.startsWith("Workout complete, good job. You ran 4.5 kilometres in 32 minutes 20 seconds, averaging 7 11 per kilometre."), s1)
+        assertTrue(s1.endsWith("1 of 1 paced step was on target."), s1)
+        assertTrue("That lap" !in s1)
 
         // several steps: complete, then last lap, then summary
         val plan = PlanBuilder.build(profile)
         val w = plan.workouts.first { it.type == SessionType.STRIDES }
         val many = simulate(RunEngine("t", RunStep.flatten(w, plan.paces))) { if (it.current.hasTarget) it.current.typical else plan.paces.jog }.last().second.speech()
         val a = many.indexOf("Workout complete, good job.")
-        val b = many.indexOf("Last lap:")
-        val c = many.indexOf("Workout summary:")
+        val b = many.indexOf("That lap was")
+        val c = many.indexOf("You ran")
         assertTrue(a == 0 && b > a && c > b, many)
 
         // ending early with Finish also gets the wrap-up
         val eng = RunEngine("Easy run", RunStep.flatten(easyRun(), easyPaces))
         eng.start(); eng.update(600_000, 1400.0, 430.0)
-        assertTrue(eng.finish().single().speech().startsWith("Workout complete, good job. Workout summary: 1.4 kilometres in 10 minutes"))
+        assertTrue(eng.finish().single().speech().startsWith("Workout complete, good job. You ran 1.4 kilometres in 10 minutes"))
     }
 
     @Test fun climbIgnoresGpsAltitudeJitter() {
@@ -385,16 +387,16 @@ class CoreTest {
             val all = spoken.joinToString("\n")
             assertTrue(eng.finished, all)
             assertTrue(cues.none { it is Cue.PaceAlert })
-            assertTrue(spoken.any { it.startsWith("Jog to the bottom of your hill and tap Next when you're there. Last lap:") }, all)
-            val ready = spoken.indexOfFirst { it.startsWith("Get ready. $word in 10 seconds:") && it.contains("hard uphill") }
+            assertTrue(spoken.any { it.startsWith("Jog to the bottom of your hill and tap Next when you're there. That lap was") }, all)
+            val ready = spoken.indexOfFirst { it.startsWith("Get ready. In 10 seconds, ") && it.contains("hard uphill for") }
             assertTrue(ready >= 0, all)
             assertEquals(listOf("3", "2", "1", "Go!"), spoken.subList(ready + 1, ready + 5), all)
-            val rest = spoken.indexOfFirst { it.startsWith("Rest. Last lap:") }
+            val rest = spoken.indexOfFirst { it.startsWith("Rest. That lap was") }
             assertTrue(rest > ready + 4 && spoken.subList(ready + 5, rest).all { it == "10 seconds left." }, all)
-            assertEquals("Jog back down. Tap Next when you're at the bottom.", spoken[rest + 1])
-            assertTrue(spoken.any { it == "10 seconds left. Next: to the hill, jog to the bottom of your hill." }, all)
-            assertTrue(spoken.single { it.startsWith("Last one. Cool-down") }.let { !it.contains("Last lap") }, all)
-            assertTrue(spoken.none { it.contains("Next: Rest") || it.contains("Run as you like") }, all)
+            assertEquals("Jog back down and tap Next when you're at the bottom.", spoken[rest + 1])
+            assertTrue(spoken.any { it == "10 seconds left, then jog to the bottom of your hill." }, all)
+            assertTrue(spoken.single { it.startsWith("Last one. Cool down for") }.let { !it.contains("That lap") }, all)
+            assertTrue(spoken.none { it.contains("then rest") || it.contains("run as you like") }, all)
             assertEquals(1, spoken.count { it.startsWith("That was the last one.") }, all)
             assertEquals("H", eng.results.first { it.label.startsWith(word) }.zoneCode)
             assertTrue(eng.results.filter { it.zoneCode == "H" }.all { it.hit == null })
@@ -633,14 +635,14 @@ class CoreTest {
         assertTrue("Run for 1 minute, nice and easy. Last one!" in spoken, all)
         assertTrue("That's all the running done. Walk for 1 minute 30 seconds." in spoken, all)
         assertTrue("Cool down by walking for 5 minutes." in spoken, all)
-        assertTrue("10 seconds left. Then run for 1 minute." in spoken, all)
-        assertTrue("10 seconds left. Then walk." in spoken, all)
+        assertTrue("10 seconds left, then run for 1 minute." in spoken, all)
+        assertTrue("10 seconds left, then walk." in spoken, all)
         // no paces, lap results or pace alerts for beginners
         assertTrue(spoken.none { it.contains("per kilometre") && !it.startsWith("Workout complete") }, all)
-        assertTrue(spoken.none { it.contains("Last lap") }, all)
+        assertTrue(spoken.none { it.contains("That lap") }, all)
         assertTrue(cues.none { it.second is Cue.PaceAlert })
         val fin = spoken.last()
-        assertTrue(fin.startsWith("Workout complete, good job. Workout summary:"), fin)
+        assertTrue(fin.startsWith("Workout complete, good job. You ran"), fin)
         assertTrue(!fin.contains("on target"), fin)
 
         // a non-stop run says when it's halfway, without a pace

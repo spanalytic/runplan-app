@@ -130,7 +130,7 @@ sealed interface Cue {
         /** The step before was a recovery jog, whose result isn't read out. */
         val prevRecovery: Boolean = false,
     ) : Cue
-    /** "10 seconds" / "200 metres to go", announcing what comes next. */
+    /** "10 seconds left" / "200 metres to go" (no full stop), announcing what comes next. */
     data class Countdown(val left: String, val next: RunStep?) : Cue
     data class Remaining(val text: String) : Cue
     /** Halfway through a step of 2 minutes or more, with the pace so far. */
@@ -149,52 +149,58 @@ sealed interface Cue {
         val targeted: Int = 0,
     ) : Cue
 
-    /** Text for text-to-speech. Targets are spoken as the middle of the band. */
+    /**
+     * Text for text-to-speech. Targets are spoken as the middle of the band. Each cue is written
+     * as plain sentences: colons and label fragments ("Next: rep,") made the voice pause mid-phrase.
+     */
     fun speech(): String = when (this) {
         is StepStart -> when {
             step.runWalk -> runWalkStart(this)
             step.kind == StepKind.READY ->
-                "Get ready." + (next?.let { " ${spokenLabel(it)} in ${spokenDuration(step.secs ?: 10.0)}: ${spokenStep(it)}." } ?: "")
+                "Get ready." + (next?.let { " In ${spokenDuration(step.secs ?: 10.0)}, ${action(it)}." } ?: "")
             afterCountdown -> "Go!"
             step.hill && step.isOpen && step.label == RunStep.TO_HILL ->
                 "Jog to the bottom of your hill and tap Next when you're there." + (prev?.let { " " + spokenResult(it) } ?: "")
             step.hill && step.isOpen ->
-                if (next?.kind == StepKind.READY) "Jog back down. Tap Next when you're at the bottom."
+                if (next?.kind == StepKind.READY) "Jog back down and tap Next when you're at the bottom."
                 else "That was the last one. Jog back down and tap Next for the cool-down."
             step.hill && step.kind == StepKind.RECOVERY -> "Rest." + (prev?.let { " " + spokenResult(it) } ?: "")
-            // a recovery jog needs no time or pace: just how the rep went
-            step.kind == StepKind.RECOVERY -> "Recover." + (prev?.let { " " + spokenResult(it) } ?: "")
+            // a recovery jog: how long it lasts and how the rep went, no pace
+            step.kind == StepKind.RECOVERY -> sentence(action(step)) + (prev?.let { " " + spokenResult(it) } ?: "")
             else -> buildString {
                 append(if (index == 0) "Let's go." else opener(step)).append(' ')
-                append(spokenLabel(step)).append(": ").append(spokenStep(step)).append('.')
+                append(sentence(action(step)))
                 // nothing about the recovery jog just finished
                 if (!prevRecovery) prev?.let { append(' ').append(spokenResult(it)) }
             }
         }
         // the 10 s rest at the top of a hill rep needs no announcing
-        is Countdown -> left + if (next?.runWalk == true) when {
-            next.walk && next.kind == StepKind.COOLDOWN -> " Then cool down with a walk."
-            next.walk -> " Then walk."
-            else -> " Then run for ${spokenDuration(next.secs ?: 0.0)}."
-        } else if (next == null || (next.hill && next.kind == StepKind.RECOVERY && !next.isOpen)) ""
-        else if (next.kind == StepKind.RECOVERY && !next.hill) " Then recover."
-        else " Next: ${spokenLabel(next).replaceFirstChar { it.lowercase() }}, ${spokenStep(next)}."
+        is Countdown -> when {
+            next == null || (next.hill && next.kind == StepKind.RECOVERY && !next.isOpen) -> "$left."
+            next.runWalk -> "$left, then " + when {
+                next.walk && next.kind == StepKind.COOLDOWN -> "cool down with a walk."
+                next.walk -> "walk."
+                else -> "run for ${spokenDuration(next.secs ?: 0.0)}."
+            }
+            isRep(next) -> "$left. Next rep is ${action(next)}."
+            else -> "$left, then ${action(next)}."
+        }
         is Remaining -> text
-        is Halfway -> if (step.runWalk) "Halfway. Keep it steady and easy." else "Halfway. Pace so far ${spokenPace(pace)} per kilometre" +
+        is Halfway -> if (step.runWalk) "Halfway. Keep it steady and easy." else "Halfway. You're averaging ${spokenPace(pace)} per kilometre" +
             (verdict(pace, step.fast, step.slow)?.let { ", $it" } ?: "") + "."
         is PaceAlert -> when {
-            step.capOnly -> "Ease off. Pace ${spokenPace(pace)}, keep it slower than ${spokenPace(step.fast)}."
-            else -> (if (tooSlow) "Speed up. " else "Slow down. ") +
-                "Pace ${spokenPace(pace)}, target ${spokenPace((step.fast + step.slow) / 2)}."
+            step.capOnly -> "Ease off, you're at ${spokenPace(pace)}. Keep it slower than ${spokenPace(step.fast)}."
+            else -> (if (tooSlow) "Speed up" else "Slow down") +
+                ", you're at ${spokenPace(pace)} and the target is ${spokenPace((step.fast + step.slow) / 2)}."
         }
-        is Split -> "Kilometre $km. ${spokenPace(secPerKm)} per kilometre."
+        is Split -> "Kilometre $km in ${spokenPace(secPerKm)}."
         is Finished -> buildString {
             append("Workout complete, good job.")
             lastLap?.let { append(' ').append(spokenResult(it)) }
-            append(" Workout summary: ").append(spokenDistance(distanceM)).append(" in ").append(spokenDuration(sec))
-            if (distanceM >= 100) append(", average ").append(spokenPace(sec / (distanceM / 1000))).append(" per kilometre")
+            append(" You ran ").append(spokenDistance(distanceM)).append(" in ").append(spokenDuration(sec))
+            if (distanceM >= 100) append(", averaging ").append(spokenPace(sec / (distanceM / 1000))).append(" per kilometre")
             append('.')
-            if (targeted > 0) append(" $onTarget of $targeted paced ${if (targeted == 1) "step" else "steps"} on target.")
+            if (targeted > 0) append(" $onTarget of $targeted paced ${if (targeted == 1) "step was" else "steps were"} on target.")
         }
     }
 
@@ -212,9 +218,6 @@ sealed interface Cue {
             }
         }
 
-        /** The step's name without its count: "Rep 2 of 3" is spoken as "Rep". */
-        fun spokenLabel(st: RunStep): String = st.label.replace(Regex(" \\d+ of \\d+$"), "")
-
         private fun opener(st: RunStep): String = when (st.kind) {
             StepKind.WARMUP -> "Let's go."
             StepKind.COOLDOWN -> "Last one."
@@ -223,33 +226,51 @@ sealed interface Cue {
             StepKind.INTERVAL -> if (st.hill || (st.zone != null && st.zone != Zone.E)) "Go!" else "Keep going."
         }
 
-        /** "1 minute at 5 26 per kilometre", "2 minutes easy jog", "12 kilometres at 7 15 per kilometre". */
-        fun spokenStep(st: RunStep): String {
+        private fun isRep(st: RunStep) = st.kind == StepKind.INTERVAL && !st.hill && st.label.startsWith("Rep ")
+
+        private fun sentence(phrase: String) = phrase.replaceFirstChar { it.uppercase() } + "."
+
+        /**
+         * What to do in a step, as a phrase that reads on after "then" or "Next rep is":
+         * "warm up for 15 minutes, no faster than 6 43 per kilometre", "3 minutes at 5 47 per kilometre",
+         * "recover for 2 minutes", "run hard uphill for 1 minute".
+         */
+        fun action(st: RunStep): String {
             val amt = when {
                 st.metres != null -> spokenDistance(st.metres)
                 st.secs != null -> spokenDuration(st.secs)
-                else -> "Run as you like"
+                else -> null
             }
+            val target = when {
+                st.capOnly -> ", no faster than ${spokenPace(st.fast)} per kilometre"
+                st.hasTarget -> " at ${spokenPace((st.fast + st.slow) / 2)} per kilometre"
+                else -> ""
+            }
+            fun forAmt(verb: String) = if (amt != null) "$verb for $amt" else verb
             return when {
                 st.hill && st.isOpen -> if (st.label == RunStep.TO_HILL) "jog to the bottom of your hill" else "jog back down"
-                st.hill && st.kind == StepKind.INTERVAL -> "$amt, hard uphill"
-                st.hill && st.kind == StepKind.RECOVERY -> "$amt rest"
-                st.kind == StepKind.READY -> "$amt countdown"
-                st.capOnly -> "$amt, no faster than ${spokenPace(st.fast)} per kilometre"
-                st.hasTarget -> "$amt at ${spokenPace((st.fast + st.slow) / 2)} per kilometre"
-                st.kind == StepKind.RECOVERY -> "$amt easy jog"
-                else -> amt
+                st.hill && st.kind == StepKind.INTERVAL -> forAmt(if (st.label.startsWith("Hill sprint")) "sprint hard uphill" else "run hard uphill")
+                st.hill && st.kind == StepKind.RECOVERY -> forAmt("rest")
+                st.kind == StepKind.READY -> forAmt("get ready")
+                st.kind == StepKind.WARMUP -> forAmt("warm up") + target
+                st.kind == StepKind.COOLDOWN -> forAmt("cool down") + target
+                st.kind == StepKind.RECOVERY -> forAmt("recover")
+                amt == null -> "run as you like"
+                isRep(st) -> amt + target
+                st.zone == Zone.E -> "easy running for $amt$target"
+                st.zone != null -> "${st.zone.word} for $amt$target"
+                else -> "run for $amt"
             }
         }
 
-        /** "Last lap: 1 minute, 208 metres, 4 49 per kilometre, 37 seconds faster than target." */
+        /** "That lap was 533 metres in 3 minutes, at 5 38 per kilometre, 4 seconds faster than target." */
         fun spokenResult(r: StepResult): String = buildString {
-            append("Last lap: ").append(spokenDuration(r.sec))
+            append("That lap was ")
             if (r.metres >= 10) {
-                append(", ").append(spokenDistance(r.metres))
-                if (r.pace.isFinite()) append(", ").append(spokenPace(r.pace)).append(" per kilometre")
+                append(spokenDistance(r.metres)).append(" in ").append(spokenDuration(r.sec))
+                if (r.pace.isFinite()) append(", at ").append(spokenPace(r.pace)).append(" per kilometre")
                 verdict(r.pace, r.fast, r.slow)?.let { append(", ").append(it) }
-            }
+            } else append(spokenDuration(r.sec))
             append('.')
         }
 
@@ -279,7 +300,7 @@ sealed interface Cue {
             val parts = ArrayList<String>()
             if (h > 0) parts += "$h ${if (h == 1L) "hour" else "hours"}"
             if (m > 0) parts += "$m ${if (m == 1L) "minute" else "minutes"}"
-            if (ss > 0 && h == 0L) parts += "$ss seconds"
+            if (ss > 0 && h == 0L) parts += "$ss ${if (ss == 1L) "second" else "seconds"}"
             return parts.joinToString(" ").ifEmpty { "0 seconds" }
         }
 
@@ -496,9 +517,9 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         val last = next == null
         if (st.secs != null && st.secs >= 180 && rem <= 60 && rem > 15 && said.add("60"))
             cues += Cue.Remaining(if (last) "One minute left in the workout." else "One minute left.")
-        if (st.secs != null && st.secs >= 30 && rem <= 10 && said.add("10")) cues += Cue.Countdown("10 seconds left.", next)
+        if (st.secs != null && st.secs >= 30 && rem <= 10 && said.add("10")) cues += Cue.Countdown("10 seconds left", next)
         if (st.metres != null && st.metres >= (if (last) 500.0 else 1000.0) && rem <= 200 && said.add("200"))
-            cues += if (last) Cue.Remaining("200 metres left in the workout.") else Cue.Countdown("200 metres to go.", next)
+            cues += if (last) Cue.Remaining("200 metres left in the workout.") else Cue.Countdown("200 metres to go", next)
 
         // pace alerts, only when well off target for a while: settle into the step, then
         // [ALERT_SUSTAIN_MS] continuously off target, then at most every [ALERT_GAP_MS].
