@@ -182,7 +182,8 @@ sealed interface Cue {
                 next.walk -> "walk."
                 else -> "run for ${spokenDuration(next.secs ?: 0.0)}."
             }
-            isRep(next) -> "$left. Next rep is ${action(next)}."
+            // not "rep": text-to-speech reads "Next rep" as "next representation"
+            isRep(next) -> "$left. Next interval is ${action(next)}."
             else -> "$left, then ${action(next)}."
         }
         is Remaining -> text
@@ -231,7 +232,7 @@ sealed interface Cue {
         private fun sentence(phrase: String) = phrase.replaceFirstChar { it.uppercase() } + "."
 
         /**
-         * What to do in a step, as a phrase that reads on after "then" or "Next rep is":
+         * What to do in a step, as a phrase that reads on after "then" or "Next interval is":
          * "warm up for 15 minutes, no faster than 6 43 per kilometre", "3 minutes at 5 47 per kilometre",
          * "recover for 2 minutes", "run hard uphill for 1 minute".
          */

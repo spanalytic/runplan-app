@@ -137,7 +137,7 @@ class CoreTest {
         }
         val all = spoken.joinToString("\n")
         // short: no "1 of 6", nothing about the recovery jogs; the warning gives the rep's details
-        assertTrue(spoken.any { it == "10 seconds left. Next rep is 1 minute at 4 49 per kilometre." }, all)
+        assertTrue(spoken.any { it == "10 seconds left. Next interval is 1 minute at 4 49 per kilometre." }, all)
         assertTrue(spoken.any { it == "10 seconds left, then recover for 2 minutes." }, all)
         assertTrue(spoken.none { it.contains(" of 6") || it.contains("jog") }, all)
         assertTrue(spoken.any { it.startsWith("Go! 1 minute at 4 49 per kilometre.") && it.contains("That lap was ") }, all)   // after the warm-up
@@ -146,7 +146,7 @@ class CoreTest {
         assertTrue(spoken.single { it.startsWith("Last one. Cool down for") }.let { !it.contains("That lap") }, all)
         assertTrue(spoken.any { it.startsWith("Halfway. You're averaging") })
         // whole sentences: no colons or bare labels that make the voice stop mid-phrase
-        assertTrue(spoken.none { ':' in it || it.contains("Next:") || it.contains("Rep ") }, all)
+        assertTrue(spoken.none { ':' in it || it.contains("Next:") || Regex("\\brep\\b", RegexOption.IGNORE_CASE).containsMatchIn(it) }, all)
         assertTrue(spoken.none { it.contains(" to ") && it.contains("per kilometre") && it.startsWith("Go!") }, "targets are spoken as one pace")
     }
 
