@@ -44,6 +44,7 @@ data class RunStep(
         }
         return when {
             hasTarget -> "$amt @ ${Fmt.band(fast, slow)}"
+            kind == StepKind.READY && isOpen -> "tap Continue"
             kind == StepKind.READY -> "$amt countdown"
             walk -> "$amt walk"
             runWalk -> "$amt run"
@@ -59,6 +60,8 @@ data class RunStep(
         const val HILL_CODE = "H"
         const val WALK_CODE = "W"
         const val TO_HILL = "To the hill"
+        /** The open wait between a race's warm-up and the race; it ends when you tap Continue. */
+        const val READY_TO_RACE = "Ready to race"
 
         fun flatten(w: Workout, p: Paces): List<RunStep> {
             if (w.type == SessionType.RUN_WALK || w.type == SessionType.NON_STOP) return runWalkSteps(w)
@@ -72,7 +75,7 @@ data class RunStep(
                 StepKind.COOLDOWN -> "Cool-down"
                 StepKind.RECOVERY -> "Recovery"
                 StepKind.INTERVAL -> if (w.type == SessionType.FREE) "Free run" else st.zone?.label ?: "Run"
-                StepKind.READY -> "Get ready"
+                StepKind.READY -> if (st.isOpen) READY_TO_RACE else "Get ready"
             }
             for (b in w.blocks) when (b) {
                 is Single -> add(b.step, if (b.step.hill && b.step.isOpen) TO_HILL else baseLabel(b.step))
@@ -156,6 +159,9 @@ sealed interface Cue {
     fun speech(): String = when (this) {
         is StepStart -> when {
             step.runWalk -> runWalkStart(this)
+            step.kind == StepKind.READY && step.isOpen ->
+                "Warm-up done. Tap Continue when the race starts." +
+                    (next?.takeIf { it.hasTarget }?.let { " Your target is ${spokenPace((it.fast + it.slow) / 2)} per kilometre." } ?: "")
             step.kind == StepKind.READY ->
                 "Get ready." + (next?.let { " In ${spokenDuration(step.secs ?: 10.0)}, ${action(it)}." } ?: "")
             afterCountdown -> "Go!"
@@ -252,7 +258,7 @@ sealed interface Cue {
                 st.hill && st.isOpen -> if (st.label == RunStep.TO_HILL) "jog to the bottom of your hill" else "jog back down"
                 st.hill && st.kind == StepKind.INTERVAL -> forAmt(if (st.label.startsWith("Hill sprint")) "sprint hard uphill" else "run hard uphill")
                 st.hill && st.kind == StepKind.RECOVERY -> forAmt("rest")
-                st.kind == StepKind.READY -> forAmt("get ready")
+                st.kind == StepKind.READY -> if (st.isOpen) "get ready to race" else forAmt("get ready")
                 st.kind == StepKind.WARMUP -> forAmt("warm up") + target
                 st.kind == StepKind.COOLDOWN -> forAmt("cool down") + target
                 st.kind == StepKind.RECOVERY -> forAmt("recover")
@@ -407,6 +413,8 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     private val recent = ArrayDeque<Pair<Long, Double>>()   // (elapsed ms, distance) for the last 50 s
     private var nextSplitKm = 1
     private var lastSplitMs = 0L
+    private var stepSplitKm = 1
+    private var stepSplitMs = 0L
     val results = ArrayList<StepResult>()
     val splits = ArrayList<Double>()
 
@@ -482,15 +490,22 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         while (recent.size > 2 && elapsedMs - recent.first().first > ALERT_WINDOW_MS + 5_000) recent.removeFirst()
         val cues = ArrayList<Cue>()
 
-        // km splits (only on longer continuous steps, so reps aren't cluttered)
+        // whole-run km splits, kept for the run's splits chart
         while (distanceM >= nextSplitKm * 1000.0) {
-            val sec = (elapsedMs - lastSplitMs) / 1000.0
-            splits += sec
+            splits += (elapsedMs - lastSplitMs) / 1000.0
             lastSplitMs = elapsedMs
-            val st = current
-            val longStep = (st.metres ?: 0.0) >= 2000 || (st.secs ?: 0.0) >= 480 || (st.isOpen && !st.hill)
-            if (longStep) cues += Cue.Split(nextSplitKm, sec)
             nextSplitKm++
+        }
+        // spoken km updates count from the start of the step, so a race says "Kilometre 1" one
+        // kilometre into the race, not into the warm-up. Only on longer continuous steps, so reps
+        // aren't cluttered, and not while waiting for the race to start.
+        while (stepM() >= stepSplitKm * 1000.0) {
+            val sec = (elapsedMs - stepSplitMs) / 1000.0
+            stepSplitMs = elapsedMs
+            val st = current
+            val longStep = (st.metres ?: 0.0) >= 2000 || (st.secs ?: 0.0) >= 480 || (st.isOpen && !st.hill && st.kind != StepKind.READY)
+            if (longStep) cues += Cue.Split(stepSplitKm, sec)
+            stepSplitKm++
         }
 
         val rem = remaining()
@@ -551,6 +566,8 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         results += done
         stepStartMs = elapsedMs
         stepStartM = distanceM
+        stepSplitKm = 1
+        stepSplitMs = elapsedMs
         said.clear()
         outSinceMs = -1
         lastAlertMs = -1_000_000L

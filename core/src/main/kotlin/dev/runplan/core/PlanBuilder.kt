@@ -216,6 +216,8 @@ object PlanBuilder {
                     race, i + 1, Phase.RACE, SessionType.RACE,
                     listOf(
                         Single(s(StepKind.WARMUP, secs = 600.0, zone = Zone.E)),
+                        // open: the race starts when you tap Continue, not when the warm-up ends
+                        Single(Step(StepKind.READY)),
                         Single(s(StepKind.INTERVAL, metres = goal.distance.metres, zone = Zone.G)),
                     ),
                     note = "Predicted ${Fmt.duration(Vdot.predictTime(paces.vdot, goal.distance.metres))}",

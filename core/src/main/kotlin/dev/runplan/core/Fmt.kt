@@ -57,7 +57,7 @@ object Fmt {
     }
 
     /** One-line summary of a workout, e.g. "15 min easy, 5 × (5 min hard + 2 min jog), 10 min easy". */
-    fun summary(w: Workout): String = w.blocks.joinToString(", ") { b ->
+    fun summary(w: Workout): String = w.blocks.filter { !(it is Single && it.step.kind == StepKind.READY) }.joinToString(", ") { b ->
         when (b) {
             is Single -> if (b.step.hill && b.step.isOpen) "jog to the hill" else stepShort(b.step)
             is Repeat -> "${b.times} × (" + b.steps.filter { it.kind != StepKind.READY }.joinToString(" + ") { stepShort(it) } + ")"

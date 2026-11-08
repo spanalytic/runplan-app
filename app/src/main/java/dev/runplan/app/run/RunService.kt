@@ -274,6 +274,9 @@ class RunService : LifecycleService() {
             // spoken: ducking it again at the step change clipped the start of that cue.
             if (s.voice && c is Cue.Countdown) speaker.hold()
             if (c is Cue.StepStart || c is Cue.Finished) speaker.unhold()
+            // A get-ready step (hill countdown, or waiting for the race to start) ends in a short
+            // "Go!": keep the podcast ducked through it so that cue isn't clipped.
+            if (s.voice && c is Cue.StepStart && c.step.kind == StepKind.READY) speaker.hold()
             if (c is Cue.StepStart) {
                 stepStarts += SystemClock.elapsedRealtime()
                 buzz(longArrayOf(0, 120, 80, 120))

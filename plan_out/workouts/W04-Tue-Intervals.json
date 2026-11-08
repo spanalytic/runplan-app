@@ -1,0 +1,62 @@
+{
+ "com.garmin.connect.workout.json.UserWorkoutJson": {
+  "workoutSteps": [
+   {
+    "stepOrder": 1,
+    "groupId": 1,
+    "stepTypeKey": "warmup",
+    "endConditionTypeKey": "time",
+    "endConditionValue": 900000,
+    "endConditionUnitKey": "ms",
+    "targetTypeKey": "pace.zone",
+    "targetValueOne": 0.22721657958059308,
+    "targetValueTwo": 0.25529259230191453,
+    "targetValueUnitKey": "centimetersPerMillisecond"
+   },
+   {
+    "stepOrder": 2,
+    "groupId": 2,
+    "stepTypeKey": "repeat",
+    "endConditionTypeKey": "iterations",
+    "endConditionValue": 4,
+    "endConditionUnitKey": "dimensionless"
+   },
+   {
+    "stepOrder": 3,
+    "groupId": 2,
+    "stepTypeKey": "interval",
+    "parentGroupId": 2,
+    "endConditionTypeKey": "time",
+    "endConditionValue": 300000,
+    "endConditionUnitKey": "ms",
+    "targetTypeKey": "pace.zone",
+    "targetValueOne": 0.3196957749904035,
+    "targetValueTwo": 0.3302538510767585,
+    "targetValueUnitKey": "centimetersPerMillisecond"
+   },
+   {
+    "stepOrder": 4,
+    "groupId": 2,
+    "stepTypeKey": "recovery",
+    "parentGroupId": 2,
+    "endConditionTypeKey": "time",
+    "endConditionValue": 120000,
+    "endConditionUnitKey": "ms",
+    "targetTypeKey": "no.target",
+    "targetValueUnitKey": "dimensionless"
+   },
+   {
+    "stepOrder": 5,
+    "groupId": 3,
+    "stepTypeKey": "cooldown",
+    "endConditionTypeKey": "time",
+    "endConditionValue": 600000,
+    "endConditionUnitKey": "ms",
+    "targetTypeKey": "pace.zone",
+    "targetValueOne": 0.22721657958059308,
+    "targetValueTwo": 0.25529259230191453,
+    "targetValueUnitKey": "centimetersPerMillisecond"
+   }
+  ]
+ }
+}

@@ -1,0 +1,8 @@
+zone,fast_per_km,slow_per_km,use
+E,6:32,7:20,easy & long runs
+M,5:53,6:03,marathon pace
+HM,5:42,5:52,half-marathon pace
+T,5:29,5:39,threshold / tempo
+I,5:03,5:13,VO2max intervals
+R,4:44,4:54,repetitions / strides
+G,5:13,5:23,5k race pace

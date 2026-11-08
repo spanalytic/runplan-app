@@ -181,6 +181,8 @@ class Workout:
             amt = (f"{s.metres / 1000:g} km" if s.metres is not None
                    else f"{s.secs / 60:g} min" if s.secs is not None else "lap button")
             if s.zone is None:
+                if s.kind == "rest" and s.secs is None and not s.hill:
+                    return "wait for the start (lap button)"
                 if s.walk:
                     return f"{amt} walk"
                 if s.hill:
@@ -478,6 +480,7 @@ def build_plan(paces: Paces, goal: str, start: date, race_day: date,
             dist = DISTANCES[goal]
             race = Workout(race_day, i + 1, "Race", "Race",
                            [Step("warmup", secs=10 * 60, zone="E"),
+                            Step("rest"),               # wait for the start: lap button
                             Step("interval", metres=dist, zone="G")])
             race.note = f"Predicted {fmt_time(predict_time(paces.vdot, dist))}"
             sessions.append(race)

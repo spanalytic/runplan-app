@@ -137,12 +137,16 @@ private fun StepLine(s: Step, p: Paces, indent: Boolean) {
                         s.isOpen -> "Jog back down"
                         else -> "Rest at the top"
                     }
-                    StepKind.READY -> "Get ready"
+                    StepKind.READY -> if (s.isOpen) "Wait for the start" else "Get ready"
                     StepKind.INTERVAL -> s.zone?.label ?: if (s.hill) "Uphill" else "Run"
                 }
                 Text(name, style = MaterialTheme.typography.titleMedium)
                 Text(
-                    if (s.hill && s.isOpen) (if (indent) "Tap Next at the bottom" else "Tap Next when you're there") else Fmt.amount(s),
+                    when {
+                        s.kind == StepKind.READY && s.isOpen -> "Tap Continue when the race starts"
+                        s.hill && s.isOpen -> if (indent) "Tap Next at the bottom" else "Tap Next when you're there"
+                        else -> Fmt.amount(s)
+                    },
                     style = MaterialTheme.typography.bodySmall, color = Palette.Slate,
                 )
             }

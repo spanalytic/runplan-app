@@ -1,0 +1,18 @@
+{
+ "com.garmin.connect.workout.json.UserWorkoutJson": {
+  "workoutSteps": [
+   {
+    "stepOrder": 1,
+    "groupId": 1,
+    "stepTypeKey": "interval",
+    "endConditionTypeKey": "distance",
+    "endConditionValue": 600000,
+    "endConditionUnitKey": "centimeter",
+    "targetTypeKey": "pace.zone",
+    "targetValueOne": 0.22721657958059308,
+    "targetValueTwo": 0.25529259230191453,
+    "targetValueUnitKey": "centimetersPerMillisecond"
+   }
+  ]
+ }
+}

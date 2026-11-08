@@ -261,6 +261,55 @@ class CoreTest {
         assertEquals(1, s2.count { it == "One minute left in the workout." }, s2.joinToString("\n"))
     }
 
+    @Test fun raceWaitsForContinueAndCountsKilometresFromTheRaceStart() {
+        val plan = PlanBuilder.build(profile.copy(goal = Goal.K5, raceEpochDay = day("2026-11-29")))
+        val race = plan.workouts.last()
+        assertEquals(SessionType.RACE, race.type)
+        assertEquals("10 min easy, 5 km race pace", Fmt.summary(race))
+        val steps = RunStep.flatten(race, plan.paces)
+        assertEquals(listOf("Warm-up", RunStep.READY_TO_RACE, "Race pace"), steps.map { it.label })
+        assertEquals("tap Continue", steps[1].describe())
+
+        val eng = RunEngine("Race day", steps)
+        val cues = ArrayList<Pair<Long, Cue>>()
+        eng.start().forEach { cues += 0L to it }
+        var t = 0L
+        var d = 0.0
+        fun run(sec: Int, pace: Double) = repeat(sec) {
+            t += 1000; d += 1000 / pace
+            eng.update(t, d, pace).forEach { cues += t to it }
+        }
+        run(600, 420.0)            // warm-up: 10 min at 7:00/km, 1.43 km
+        run(300, 600.0)            // waiting at the start: it doesn't move on by itself
+        assertEquals(1, eng.index)
+        val wait = cues.map { it.second }.filterIsInstance<Cue.StepStart>().last()
+        assertEquals("Warm-up done. Tap Continue when the race starts. Your target is ${Cue.spokenPace((steps[2].fast + steps[2].slow) / 2)} per kilometre.", wait.speech())
+        assertTrue(cues.any { it.second.speech() == "10 seconds left, then get ready to race." }, cues.joinToString("\n") { it.second.speech() })
+        // no km updates while waiting
+        assertTrue(cues.none { it.first > 600_000 && it.second is Cue.Split })
+
+        val raceStartMs = t
+        val raceStartM = d
+        cues += t to eng.advance().single()          // tap Continue
+        assertEquals("Go!", cues.last().second.speech())
+        run(5 * 330 + 2, 330.0)   // the race at 5:30/km
+        assertTrue(eng.finished)
+
+        // km updates count from the start of the race: kilometre 1 comes 1 km into the race, at race pace
+        val raceSplits = cues.filter { it.first > raceStartMs }.map { it.second }.filterIsInstance<Cue.Split>()
+        assertEquals(listOf(1, 2, 3, 4, 5), raceSplits.map { it.km })
+        raceSplits.forEach { assertTrue(abs(it.secPerKm - 330) <= 2, "${it.secPerKm}") }
+        val first = cues.first { it.first > raceStartMs && it.second is Cue.Split }
+        assertTrue(abs((first.first - raceStartMs) / 1000.0 - 330) <= 1)
+        assertTrue(raceStartM > 1000)
+        // the run's splits chart still covers the whole run
+        assertEquals(eng.distanceM.toInt() / 1000, eng.splits.size)
+        // the finish gives the race as the last lap
+        val fin = cues.last().second.speech()
+        assertTrue(fin.startsWith("Workout complete, good job. That lap was 5"), fin)
+        assertTrue(cues.none { Regex("\\brep\\b", RegexOption.IGNORE_CASE).containsMatchIn(it.second.speech()) })
+    }
+
     @Test fun shortLastStepGetsNoEndWarning() {
         val w = Workout(0, 1, Phase.BASE, SessionType.STRIDES, listOf(
             Single(Step(StepKind.WARMUP, secs = 600.0, zone = Zone.E)),

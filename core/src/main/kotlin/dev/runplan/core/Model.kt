@@ -2,7 +2,10 @@ package dev.runplan.core
 
 import java.time.LocalDate
 
-/** [READY] is a short countdown before a rep that you start with a tap (hill sessions). */
+/**
+ * [READY] is a short countdown before a rep that you start with a tap (hill sessions), or, when
+ * open, a wait that ends with a tap (race day: between the warm-up and the race).
+ */
 enum class StepKind { WARMUP, INTERVAL, RECOVERY, COOLDOWN, READY }
 
 /**

@@ -1,0 +1,25 @@
+date,dow,week,phase,session,est_km,est_min,workout,note,runnerup_file
+2026-10-20,Tue,1,Base,Strides,6.4,43,15 min @ E 6:32-7:20/km | 6x (1 min @ R 4:44-4:54/km + 2 min jog) | 10 min @ E 6:32-7:20/km,,W01-Tue-Strides.json
+2026-10-21,Wed,1,Base,Easy,4.0,28,4 km @ E 6:32-7:20/km,,W01-Wed-Easy.json
+2026-10-23,Fri,1,Base,Threshold,6.3,40,12 min @ E 6:32-7:20/km | 3x (5 min @ T 5:29-5:39/km + 1 min jog) | 10 min @ E 6:32-7:20/km,,W01-Fri-Threshold.json
+2026-10-25,Sun,1,Base,Long,9.0,62,9 km @ E 6:32-7:20/km,,W01-Sun-Long.json
+2026-10-27,Tue,2,Base,Strides,8.3,55,15 min @ E 6:32-7:20/km | 10x (1 min @ R 4:44-4:54/km + 2 min jog) | 10 min @ E 6:32-7:20/km,,W02-Tue-Strides.json
+2026-10-28,Wed,2,Base,Easy,4.0,28,4 km @ E 6:32-7:20/km,,W02-Wed-Easy.json
+2026-10-30,Fri,2,Base,Threshold,6.3,40,12 min @ E 6:32-7:20/km | 3x (5 min @ T 5:29-5:39/km + 1 min jog) | 10 min @ E 6:32-7:20/km,,W02-Fri-Threshold.json
+2026-11-01,Sun,2,Base,Long,10.0,69,10 km @ E 6:32-7:20/km,,W02-Sun-Long.json
+2026-11-03,Tue,3,Build,Intervals,6.5,41,15 min @ E 6:32-7:20/km | 4x (3 min @ I 5:03-5:13/km + 1 min jog) | 10 min @ E 6:32-7:20/km,,W03-Tue-Intervals.json
+2026-11-04,Wed,3,Build,Easy,4.5,31,4.5 km @ E 6:32-7:20/km,,W03-Wed-Easy.json
+2026-11-06,Fri,3,Build,Threshold,8.3,52,12 min @ E 6:32-7:20/km | 4x (6 min @ T 5:29-5:39/km + 1.5 min jog) | 10 min @ E 6:32-7:20/km,,W03-Fri-Threshold.json
+2026-11-08,Sun,3,Build,Long,11.0,76,11 km @ E 6:32-7:20/km,,W03-Sun-Long.json
+2026-11-10,Tue,4,Build,Intervals,8.5,53,15 min @ E 6:32-7:20/km | 4x (5 min @ I 5:03-5:13/km + 2 min jog) | 10 min @ E 6:32-7:20/km,Cut-back week,W04-Tue-Intervals.json
+2026-11-11,Wed,4,Build,Easy,4.0,28,4 km @ E 6:32-7:20/km,Cut-back week,W04-Wed-Easy.json
+2026-11-13,Fri,4,Build,Easy,4.0,28,4 km @ E 6:32-7:20/km,Cut-back week,W04-Fri-Easy.json
+2026-11-15,Sun,4,Build,Long,9.0,62,9 km @ E 6:32-7:20/km,Cut-back week,W04-Sun-Long.json
+2026-11-17,Tue,5,Peak,Intervals,8.5,53,15 min @ E 6:32-7:20/km | 4x (5 min @ I 5:03-5:13/km + 2 min jog) | 10 min @ E 6:32-7:20/km,,W05-Tue-Intervals.json
+2026-11-18,Wed,5,Peak,Easy,6.0,42,6 km @ E 6:32-7:20/km,,W05-Wed-Easy.json
+2026-11-20,Fri,5,Peak,Tempo,5.9,37,12 min @ E 6:32-7:20/km | 15 min @ T 5:29-5:39/km | 10 min @ E 6:32-7:20/km,,W05-Fri-Tempo.json
+2026-11-22,Sun,5,Peak,Long,11.5,80,11.5 km @ E 6:32-7:20/km,,W05-Sun-Long.json
+2026-11-24,Tue,6,Taper,Intervals,6.1,40,15 min @ E 6:32-7:20/km | 3x (3 min @ I 5:03-5:13/km + 2 min jog) | 10 min @ E 6:32-7:20/km,,W06-Tue-Intervals.json
+2026-11-25,Wed,6,Taper,Easy,4.0,28,4 km @ E 6:32-7:20/km,,W06-Wed-Easy.json
+2026-11-27,Fri,6,Taper,Easy,4.0,28,4 km @ E 6:32-7:20/km,Shakeout: add 4x20s strides,W06-Fri-Easy.json
+2026-11-29,Sun,6,Race,Race,6.4,36,10 min @ E 6:32-7:20/km | wait for the start (lap button) | 5 km @ G 5:13-5:23/km,Predicted 26:29,W06-Sun-Race.json

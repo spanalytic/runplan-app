@@ -214,8 +214,10 @@ private fun ActiveRun(
         // time / distance left in this step
         // an open step in a workout (jog to / back down the hill) ends when you tap Next
         val tapToContinue = !s.stepRemaining.isFinite() && s.nextLabel.isNotEmpty()
+        // race day: the race starts when you tap Continue after the warm-up
+        val raceWait = s.stepLabel == RunStep.READY_TO_RACE
         if (tapToContinue) {
-            Text("Tap Next when you're ready", style = MaterialTheme.typography.headlineSmall, color = ink)
+            Text(if (raceWait) "Tap Continue when the race starts" else "Tap Next when you're ready", style = MaterialTheme.typography.headlineSmall, color = ink)
         }
         if (s.stepRemaining.isFinite()) {
             Row(verticalAlignment = Alignment.Bottom) {
@@ -249,7 +251,7 @@ private fun ActiveRun(
                 ink,
                 onClick = { RunService.send(ctx, if (paused) RunService.ACTION_RESUME else RunService.ACTION_PAUSE) },
             )
-            RoundButton(Icons.Filled.SkipNext, if (tapToContinue) "Next" else "Skip step", ink, small = !tapToContinue) { RunService.send(ctx, RunService.ACTION_SKIP) }
+            RoundButton(Icons.Filled.SkipNext, if (raceWait) "Continue" else if (tapToContinue) "Next" else "Skip step", ink, small = !tapToContinue) { RunService.send(ctx, RunService.ACTION_SKIP) }
         }
         Spacer(Modifier.height(8.dp))
     }
