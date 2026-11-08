@@ -22,6 +22,13 @@ object Recovery {
         PlanBuilder.mondayOf(start + REST_DAYS + 1) + 7,
     )
 
+    /**
+     * Start day for a plan that follows a finished one, set up on [today]. With recovery weeks it's
+     * today (they begin with rest days); without, it's next Monday, so nothing lands on the day
+     * the last plan finished (often race day) and week 1 is a whole week.
+     */
+    fun nextPlanStart(today: Long, weeks: Int): Long = if (weeks > 0) today else PlanBuilder.mondayOf(today) + 7
+
     private fun r5(x: Double): Double = max(0.5, Math.rint(x * 2) / 2)
 
     fun build(profile: Profile): Plan {

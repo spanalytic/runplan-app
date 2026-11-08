@@ -108,8 +108,10 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
     val askRecovery = !beginner && (template != null || (existing?.recoveryWeeks ?: 0) > 0)
     val recoveryWeeks = if (askRecovery) recovery else 0
     var km by rememberSaveable { mutableFloatStateOf(known?.currentKm?.toFloat() ?: 25f) }
-    // switching plan type starts afresh from today
-    val start = existing?.takeIf { it.beginner == beginner }?.startEpochDay?.let { if (beginner) it else it.coerceAtMost(race) } ?: today
+    // switching plan type starts afresh from today; a plan after a finished one starts next Monday
+    // unless it begins with recovery weeks
+    val start = existing?.takeIf { it.beginner == beginner }?.startEpochDay?.let { if (beginner) it else it.coerceAtMost(race) }
+        ?: if (template != null) Recovery.nextPlanStart(today, recoveryWeeks) else today
     val pages = if (beginner) BEGINNER_PAGES else if (askRecovery) NEXT_PAGES else RACE_PAGES
     // the training itself starts after any recovery weeks
     val planStart = if (recoveryWeeks > 0) Recovery.planStart(start, recoveryWeeks) else start
@@ -190,7 +192,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                         "A week or two of short, easy runs lets your legs recover before the next plan builds up again.",
                     )
                     listOf(
-                        Triple(0, "Start the new plan now", "Straight back into training"),
+                        Triple(0, "No easy weeks", "Training starts next Monday"),
                         Triple(1, "One easy week", "Good after a 5K or 10K"),
                         Triple(2, "Two easy weeks", "Good after a half or full marathon"),
                     ).forEach { (n, title, help) ->
@@ -206,14 +208,12 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                         }
                         HorizontalDivider(color = Palette.Line)
                     }
-                    if (recovery > 0) {
-                        Spacer(Modifier.height(24.dp))
-                        Text(
-                            "Rest for a couple of days, then easy runs on your usual days. " +
-                                "The new plan starts on Monday ${dayMonthYear(planStart)}.",
-                            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
-                        )
-                    }
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        (if (recovery > 0) "Rest for a couple of days, then easy runs on your usual days. " else "") +
+                            "The new plan starts on Monday ${dayMonthYear(planStart)}.",
+                        style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+                    )
                 }
 
                 Page.FITNESS -> {

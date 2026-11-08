@@ -777,6 +777,13 @@ class CoreTest {
         val one = PlanBuilder.build(next.copy(recoveryWeeks = 1))
         assertEquals("2026-11-17", one.workouts.first { it.phase != Phase.RECOVER }.date.toString())
         assertEquals(listOf(3.5, 3.5, 3.5), one.workouts.filter { it.phase == Phase.RECOVER }.map { it.estimate(one.paces).first })
+        // straight into the next plan: it starts next Monday, not on race day
+        assertEquals(day("2026-11-09"), Recovery.nextPlanStart(day("2026-11-08"), 0))
+        assertEquals(day("2026-11-16"), Recovery.nextPlanStart(day("2026-11-09"), 0))
+        assertEquals(day("2026-11-08"), Recovery.nextPlanStart(day("2026-11-08"), 1))
+        val now = PlanBuilder.build(next.copy(startEpochDay = Recovery.nextPlanStart(day("2026-11-08"), 0), recoveryWeeks = 0))
+        assertEquals("2026-11-10", now.workouts.first().date.toString())
+        assertEquals(1, now.workouts.first().week)
         // too close to race day for the plan after the recovery weeks
         assertFailsWith<PlanException> { PlanBuilder.build(next.copy(raceEpochDay = day("2026-12-13"))) }
     }
