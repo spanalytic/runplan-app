@@ -69,7 +69,7 @@ enum class Goal(val distance: Distance, val label: String, val peakKmAt5Days: Do
     val minWeeks: Int get() = taper.size + 3
 }
 
-enum class Phase(val label: String) { BASE("Base"), BUILD("Build"), PEAK("Peak"), TAPER("Taper"), RACE("Race"), START("Start running") }
+enum class Phase(val label: String) { RECOVER("Recovery"), BASE("Base"), BUILD("Build"), PEAK("Peak"), TAPER("Taper"), RACE("Race"), START("Start running") }
 
 enum class SessionType(val label: String, val quality: Boolean) {
     STRIDES("Strides", true),
@@ -155,6 +155,8 @@ data class Profile(
     /** Swap some interval and strides sessions for hill sessions. */
     val hills: Boolean = false,
     val level: Level = Level.INTERMEDIATE,
+    /** Easy weeks from the start day before the plan proper (after finishing a plan). See [Recovery]. */
+    val recoveryWeeks: Int = 0,
 ) {
     val paces: Paces get() = Paces.of(recentDistance, recentSec, goal.distance)
     /** A run/walk plan ([StartRunning]): no race, no pace targets, no fitness to set. */

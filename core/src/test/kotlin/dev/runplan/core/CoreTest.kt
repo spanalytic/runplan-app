@@ -742,4 +742,51 @@ class CoreTest {
         val (dx, _) = RouteLine.directions(floatArrayOf(0f, 0f, 0f, 10f, 20f, 30f), FloatArray(6), 5f)
         assertTrue(dx.all { it > 0.9f }, dx.toList().toString())
     }
+
+    // ---- race day and the next plan ---------------------------------------------------------
+
+    @Test fun recoveryWeeksComeBeforeTheNextPlan() {
+        // same as: runplan.py --recent 5k=28:33 --goal 10k --start 2026-11-08 --race-date 2027-02-14 --days tue,thu,sat,sun --current-km 22 --recovery-weeks 2
+        val next = Profile(
+            Distance.K5, 28 * 60 + 33.0, Goal.K10, day("2026-11-08"), day("2027-02-14"),
+            listOf(1, 3, 5, 6), 22.0, recoveryWeeks = 2,
+        )
+        val plan = PlanBuilder.build(next)
+        assertEquals(14, plan.weeks)
+        val rec = plan.workouts.filter { it.phase == Phase.RECOVER }
+        assertEquals(listOf("2026-11-12", "2026-11-14", "2026-11-15", "2026-11-17", "2026-11-19", "2026-11-21", "2026-11-22"),
+            rec.map { it.date.toString() })
+        assertTrue(rec.all { it.type == SessionType.EASY && it.note == Recovery.NOTE })
+        assertEquals(listOf(3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0), rec.map { it.estimate(plan.paces).first })
+        assertEquals(listOf(1, 1, 1, 2, 2, 2, 2), rec.map { it.week })
+        val first = plan.workouts.first { it.phase != Phase.RECOVER }
+        assertEquals("2026-11-24", first.date.toString())
+        assertEquals(3, first.week)
+        assertEquals(SessionType.STRIDES, first.type)
+        // the plan proper is the plan that would start on that Monday, weeks numbered on
+        val plain = PlanBuilder.build(next.copy(startEpochDay = day("2026-11-23"), recoveryWeeks = 0))
+        assertEquals(plain.workouts.map { it.epochDay to it.type }, plan.workouts.drop(rec.size).map { it.epochDay to it.type })
+        assertEquals(plain.weeks + 2, plan.weeks)
+        assertEquals(day("2027-02-14"), plan.profile.raceEpochDay)
+        // week 1 is the first recovery week
+        assertEquals(0, Progress.planStatus(plan, emptySet(), day("2026-11-08")).week)
+        assertEquals(4L, Progress.planStatus(plan, emptySet(), day("2026-11-08")).startsIn)
+        assertEquals(1, Progress.planStatus(plan, emptySet(), day("2026-11-12")).week)
+        assertEquals(3, Progress.planStatus(plan, emptySet(), day("2026-11-24")).week)
+        // one recovery week: the plan starts the Monday after next
+        val one = PlanBuilder.build(next.copy(recoveryWeeks = 1))
+        assertEquals("2026-11-17", one.workouts.first { it.phase != Phase.RECOVER }.date.toString())
+        assertEquals(listOf(3.5, 3.5, 3.5), one.workouts.filter { it.phase == Phase.RECOVER }.map { it.estimate(one.paces).first })
+        // too close to race day for the plan after the recovery weeks
+        assertFailsWith<PlanException> { PlanBuilder.build(next.copy(raceEpochDay = day("2026-12-13"))) }
+    }
+
+    @Test fun finishedPlansStayAsMilestones() {
+        val plan = PlanBuilder.build(profile)
+        val runs = listOf(RunSummary(day("2026-10-20"), 5000.0, 1800.0))
+        val past = listOf(Milestone(Progress.finishedTitle(PlanBuilder.build(profile.copy(goal = Goal.K10))), day("2026-10-21")))
+        assertEquals("Finished your 10K plan", past[0].title)
+        assertTrue(Progress.milestones(runs, plan, emptySet(), past).any { it.title == "Finished your 10K plan" })
+        assertEquals("Finished your half marathon plan", Progress.finishedTitle(plan))
+    }
 }

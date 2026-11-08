@@ -54,6 +54,7 @@ import dev.runplan.core.Fmt
 import dev.runplan.core.Moves
 import dev.runplan.core.Vdot
 import dev.runplan.core.Plan
+import dev.runplan.core.Progress
 import dev.runplan.core.Workout
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -64,7 +65,10 @@ private val longDate = DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.UK)
 private val dow = DateTimeFormatter.ofPattern("EEE", Locale.UK)
 
 @Composable
-fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String) -> Unit, startRun: (String?) -> Unit, buildWorkout: () -> Unit, resumeRun: () -> Unit) {
+fun PlanTab(
+    modifier: Modifier, openSession: (String) -> Unit, openRun: (String) -> Unit, startRun: (String?) -> Unit,
+    buildWorkout: () -> Unit, resumeRun: () -> Unit, newPlan: () -> Unit,
+) {
     val session by RunSession.view.collectAsStateWithLifecycle()
     val runActive = session.phase in setOf(RunPhase.READY, RunPhase.RUNNING, RunPhase.PAUSED)
     val plan by RunPlanApp.store.plan.collectAsStateWithLifecycle()
@@ -85,6 +89,8 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
     val open: (String) -> Unit = { id -> runFor[id]?.let { openRun(it.id) } ?: openSession(id) }
     // a done session with a recorded run shows what was actually run
     val ran: (Workout) -> RunRecord? = { w -> runFor[w.id]?.takeIf { w.id in state.done } }
+    // every session done, or race day gone: time for the next plan
+    val finished = remember(p, state.done, today) { Progress.planStatus(p, state.done, today).finished }
     val currentWeek = remember(p, today) { p.workouts.firstOrNull { it.epochDay >= today }?.week ?: p.weeks }
     var showEarlier by remember { mutableStateOf(false) }
     // long-press a session to move it to another day of its week
@@ -107,9 +113,9 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
                 val weeks = "$weeksLeft ${if (weeksLeft == 1L) "week" else "weeks"}"
                 Text(
                     when {
-                        p.profile.beginner && today > p.profile.raceEpochDay -> "Plan complete: you can run for 30 minutes"
+                        p.profile.beginner && finished -> "Plan complete: you can run for 30 minutes"
                         p.profile.beginner -> "Running 30 minutes non-stop in $weeks"
-                        today > p.profile.raceEpochDay -> "${p.profile.goal.label} plan complete"
+                        finished -> "${p.profile.goal.label} plan complete"
                         else -> "${p.profile.goal.label} in $weeks"
                     },
                     style = MaterialTheme.typography.titleSmall, color = Palette.Slate,
@@ -126,6 +132,7 @@ fun PlanTab(modifier: Modifier, openSession: (String) -> Unit, openRun: (String)
                 Text(LocalDate.ofEpochDay(today).format(longDate), style = MaterialTheme.typography.headlineMedium)
             }
         }
+        if (finished) item { NextPlanCard(p.profile.beginner, newPlan) }
         item {
             TodayBlock(p, today, state.done, p.on(today)?.let(ran), open, startRun, buildWorkout)
         }
@@ -224,6 +231,28 @@ private fun TodayBlock(p: Plan, today: Long, done: Set<String>, run: RunRecord?,
                 Spacer(Modifier.width(8.dp))
                 TextButton(onClick = { openSession(w.id) }) { Text("Details") }
             }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+}
+
+/** Shown once the plan is finished: on to the next one, with easy weeks first if wanted. */
+@Composable
+private fun NextPlanCard(beginner: Boolean, newPlan: () -> Unit) {
+    Column(
+        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface).padding(20.dp),
+    ) {
+        Text("Plan complete, well done", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            if (beginner) "Ready for what's next? Set up a new plan, such as training for a 5K race."
+            else "Ready for what's next? Set up a new plan. You can start it with an easy week or two to recover.",
+            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+        )
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = newPlan, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Text("Start a new plan")
         }
     }
     Spacer(Modifier.height(8.dp))

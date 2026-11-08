@@ -159,6 +159,7 @@ object PlanBuilder {
     }
 
     fun build(profile: Profile): Plan {
+        if (profile.recoveryWeeks > 0) return Recovery.build(profile)
         if (profile.beginner) return StartRunning.build(profile)
         val goal = profile.goal
         val paces = profile.paces

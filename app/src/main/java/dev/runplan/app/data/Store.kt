@@ -9,6 +9,9 @@ import dev.runplan.core.Goal
 import dev.runplan.core.Kept
 import dev.runplan.core.Moves
 import dev.runplan.core.Level
+import dev.runplan.core.Milestone
+import dev.runplan.core.Progress
+import dev.runplan.core.Recovery
 import dev.runplan.core.Plan
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
@@ -67,6 +70,8 @@ data class AppState(
     val moves: Map<String, Long> = emptyMap(),
     /** Done sessions as they were when done (workout id -> workout), so editing the plan doesn't change them. */
     val kept: Map<String, Workout> = emptyMap(),
+    /** Milestones from earlier plans ("Finished your 5K plan"), kept when a new plan starts. */
+    val pastMilestones: List<Milestone> = emptyList(),
 )
 
 /**
@@ -199,6 +204,55 @@ class Store(context: Context) {
     }
 
     fun resetPlan() = update { it.copy(profile = null, done = emptySet(), moves = emptyMap(), kept = emptyMap()) }
+
+    /**
+     * Replaces the plan with one built from [p]. Runs stay; done flags and moves belong to the old
+     * plan and go. Finishing the old plan stays as a milestone.
+     */
+    fun startNewPlan(p: Profile) = update { st ->
+        val old = _plan.value
+        val finished = old?.takeIf { it.workouts.isNotEmpty() && it.workouts.all { w -> w.id in st.done } }
+            ?.let { Milestone(Progress.finishedTitle(it), it.workouts.maxOf { w -> w.epochDay }) }
+        st.copy(
+            profile = p, done = emptySet(), moves = emptyMap(), kept = emptyMap(),
+            pastMilestones = st.pastMilestones + listOfNotNull(finished),
+        )
+    }
+
+    /**
+     * The current plan's answers, brought up to date as a starting point for the next plan:
+     * fitness from the race just run, weekly distance from the last 4 weeks, and recovery weeks
+     * suggested when the plan is finished (two after a half or full marathon, otherwise one).
+     */
+    fun nextPlanTemplate(today: Long): Profile? {
+        val st = _state.value
+        val p = st.profile ?: return null
+        val plan = _plan.value
+        val finished = plan != null && Progress.planStatus(plan, st.done, today).finished
+        val race = plan?.workouts?.firstOrNull { it.type == SessionType.RACE }?.id?.let { id ->
+            st.runs.filter { it.workoutId == id }.maxByOrNull { it.startMs }
+                ?.steps?.firstOrNull { it.zoneCode == Zone.G.code && it.metres > 0 }
+        }
+        val goalM = p.goal.distance.metres
+        val raceSec = race?.takeIf { kotlin.math.abs(it.metres - goalM) <= goalM * 0.1 }?.let { it.sec * goalM / it.metres }
+        val recent = st.runs.filter { it.epochDay in today - 27..today }
+        val weekKm = if (recent.isEmpty()) null else recent.sumOf { it.metres } / 1000 / 4
+        return p.copy(
+            recentDistance = if (raceSec != null) p.goal.distance else p.recentDistance,
+            // a beginner plan's fitness is a placeholder: ask for a real one
+            recentSec = raceSec ?: if (p.beginner) 0.0 else p.recentSec,
+            level = if (p.beginner) Level.INTERMEDIATE else p.level,
+            startEpochDay = today,
+            raceEpochDay = if (p.raceEpochDay > today + 28) p.raceEpochDay else today + 7 * 12,
+            currentKm = (weekKm ?: p.currentKm).let { Math.round(it).toDouble() }.coerceIn(5.0, 100.0),
+            peakKm = null,
+            recoveryWeeks = when {
+                !finished -> 0
+                p.goal == Goal.HALF || p.goal == Goal.MARATHON -> Recovery.MAX_WEEKS
+                else -> 1
+            },
+        )
+    }
 
     // ---- run in progress ------------------------------------------------------------------
 
@@ -343,12 +397,16 @@ class Store(context: Context) {
                     put("terrain", p.terrain.name)
                     put("hills", p.hills)
                     put("level", p.level.name)
+                    put("recoveryWeeks", p.recoveryWeeks)
                 })
             }
             put("done", JSONArray(s.done.toList()))
             put("analyticsVersion", s.analyticsVersion)
             put("moves", JSONObject().apply { s.moves.forEach { (id, day) -> put(id, day) } })
             put("kept", JSONObject().apply { s.kept.forEach { (id, w) -> put(id, workoutToJson(w)) } })
+            put("pastMilestones", JSONArray().apply {
+                s.pastMilestones.forEach { put(JSONObject().put("title", it.title).put("epochDay", it.epochDay)) }
+            })
             put("settings", JSONObject().apply {
                 put("voice", s.settings.voice)
                 put("paceAlerts", s.settings.paceAlerts)
@@ -406,6 +464,7 @@ class Store(context: Context) {
                     terrain = runCatching { Terrain.valueOf(p.optString("terrain", "FLAT")) }.getOrDefault(Terrain.FLAT),
                     hills = p.optBoolean("hills", false),
                     level = runCatching { Level.valueOf(p.optString("level", "INTERMEDIATE")) }.getOrDefault(Level.INTERMEDIATE),
+                    recoveryWeeks = p.optInt("recoveryWeeks", 0),
                 )
             }
             val done = o.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
@@ -420,7 +479,12 @@ class Store(context: Context) {
             val kept = o.optJSONObject("kept")?.let { k ->
                 k.keys().asSequence().mapNotNull { id -> runCatching { id to workoutFromJson(k.getJSONObject(id)) }.getOrNull() }.toMap()
             } ?: emptyMap()
-            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0), moves, kept)
+            val past = o.optJSONArray("pastMilestones")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    runCatching { a.getJSONObject(i).let { Milestone(it.getString("title"), it.getLong("epochDay")) } }.getOrNull()
+                }
+            } ?: emptyList()
+            return AppState(profile, done, settings, runs, o.optInt("analyticsVersion", 0), moves, kept, past)
         }
 
         fun workoutToJson(w: Workout): JSONObject = JSONObject().apply {

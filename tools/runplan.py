@@ -575,6 +575,42 @@ def build_beginner_plan(start: date, days: list[str]) -> list[Workout]:
 
 
 # --------------------------------------------------------------------------- #
+# Recovery weeks before a new plan (Recovery.kt)
+# --------------------------------------------------------------------------- #
+
+RECOVERY_REST_DAYS = 2
+
+
+def recovery_plan_start(start: date, weeks: int) -> date:
+    """The Monday the plan proper starts: nearest to `weeks` weeks after start, and after it."""
+    def monday(d: date) -> date:
+        return d - timedelta(days=d.weekday())
+    return max(monday(start + timedelta(days=7 * weeks + 3)),
+               monday(start + timedelta(days=RECOVERY_REST_DAYS + 1)) + timedelta(days=7))
+
+
+def build_recovery(start: date, weeks: int, days: list[str], current_km: float) -> tuple[list[Workout], date]:
+    """Two rest days, then an easy run on each run day: ~60% of a usual week over one recovery
+    week, or 50% then 75% over two. Returns the runs and the Monday the plan proper starts."""
+    plan_start = recovery_plan_start(start, weeks)
+    first = start + timedelta(days=RECOVERY_REST_DAYS + 1)
+    week0 = first - timedelta(days=first.weekday())
+    n_weeks = (plan_start - week0).days // 7
+    usual = max(current_km, 10.0)
+    out: list[Workout] = []
+    d = first
+    while d < plan_start:
+        if DAY_NAMES[d.weekday()] in days:
+            k = (d - week0).days // 7
+            share = 0.6 if n_weeks == 1 else 0.5 + 0.25 * k / (n_weeks - 1)
+            km = r5(min(8.0, max(3.0, usual * share / len(days))))
+            out.append(Workout(d, k + 1, "Recovery", "Easy", [Step("interval", metres=km * 1000, zone="E")],
+                               "Recovery week: keep it short and easy."))
+        d += timedelta(days=1)
+    return out, plan_start
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 
@@ -599,6 +635,8 @@ def main(argv=None) -> None:
     ap.add_argument("--peak-km", type=float, help="override peak weekly km")
     ap.add_argument("--terrain", default="flat", choices=["flat", "rolling", "hilly"], help="how hilly the race is")
     ap.add_argument("--hills", action="store_true", help="add hill sprints / hill repeats")
+    ap.add_argument("--recovery-weeks", type=int, default=0, choices=[0, 1, 2],
+                    help="easy weeks from --start before the plan proper (after finishing a plan)")
     ap.add_argument("--from-date", type=date.fromisoformat,
                     help="only export sessions on/after this date (use after a recalibration)")
     ap.add_argument("--out", default="plan_out", help="output directory")
@@ -624,12 +662,21 @@ def main(argv=None) -> None:
     if len(days) < 3:
         raise SystemExit("need at least 3 run days")
 
+    recovery, n_rec, first_day = [], 0, start
+    if a.recovery_weeks:
+        recovery, plan_start = build_recovery(start, a.recovery_weeks, days, a.current_km)
+        first = start + timedelta(days=RECOVERY_REST_DAYS + 1)
+        n_rec = (plan_start - (first - timedelta(days=first.weekday()))).days // 7
+        start = plan_start
     if a.beginner:
         plan = build_beginner_plan(start, days)
         last = plan[-1].day
         race_day = last + timedelta(days=6 - last.weekday())
     else:
         plan = build_plan(paces, a.goal, start, race_day, days, a.current_km, a.peak_km, a.terrain, a.hills)
+    for w in plan:
+        w.week += n_rec
+    plan = recovery + plan
     if a.from_date:
         plan = [w for w in plan if w.day >= a.from_date]
 
@@ -674,7 +721,7 @@ def main(argv=None) -> None:
         print(f"  {z:>2}: {fmt_pace(f)}-{fmt_pace(s)}/km")
     print("Predicted: " + ", ".join(f"{k} {fmt_time(predict_time(v, DISTANCES[k]))}"
                                     for k in ("5k", "10k", "half", "marathon")))
-    print(f"\n{len(plan)} sessions, {start} -> {race_day}  ({out}/plan.csv, {out}/workouts.zip)")
+    print(f"\n{len(plan)} sessions, {first_day} -> {race_day}  ({out}/plan.csv, {out}/workouts.zip)")
     weeks: dict[int, list] = {}
     for r in rows:
         weeks.setdefault(r["week"], []).append(r)

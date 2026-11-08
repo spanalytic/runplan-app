@@ -64,6 +64,7 @@ import dev.runplan.core.Goal
 import dev.runplan.core.Level
 import dev.runplan.core.PlanBuilder
 import dev.runplan.core.Profile
+import dev.runplan.core.Recovery
 import dev.runplan.core.StartRunning
 import dev.runplan.core.Terrain
 import dev.runplan.core.Vdot
@@ -71,8 +72,10 @@ import java.time.LocalDate
 import kotlin.math.roundToInt
 
 /** The questions, in order. Beginners skip everything about races and fitness. */
-private enum class Page { LEVEL, FITNESS, GOAL, HILLS, RACE, DAYS, VOLUME }
-private val RACE_PAGES = Page.entries.toList()
+private enum class Page { LEVEL, RECOVER, FITNESS, GOAL, HILLS, RACE, DAYS, VOLUME }
+private val RACE_PAGES = Page.entries.toList() - Page.RECOVER
+/** After finishing a plan: the recovery question comes straight after the level. */
+private val NEXT_PAGES = Page.entries.toList()
 private val BEGINNER_PAGES = listOf(Page.LEVEL, Page.DAYS)
 private const val DAY_MS = 86_400_000L
 private val DAY_LETTERS = listOf("M", "T", "W", "T", "F", "S", "S")
@@ -80,38 +83,45 @@ private val INPUT_DISTANCES = listOf(Distance.MILE, Distance.K3, Distance.K5, Di
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: (() -> Unit)?) {
+fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: (() -> Unit)?, template: Profile? = null) {
     val today = remember { LocalDate.now().toEpochDay() }
     var page by rememberSaveable { mutableIntStateOf(0) }
 
-    // answers
-    var level by rememberSaveable { mutableStateOf(existing?.level ?: Level.INTERMEDIATE) }
+    // answers: from the plan being edited, or the last plan's when setting up the next one
+    val source = existing ?: template
+    var level by rememberSaveable { mutableStateOf(source?.level ?: Level.INTERMEDIATE) }
     val beginner = level == Level.BEGINNER
     // a beginner plan stores a placeholder fitness, which isn't theirs to see
-    val known = existing?.takeIf { !it.beginner }
+    val known = source?.takeIf { !it.beginner }
     var distance by rememberSaveable { mutableStateOf(known?.recentDistance ?: Distance.K5) }
-    val secs = known?.recentSec?.roundToInt() ?: 0
+    val secs = known?.recentSec?.takeIf { it > 0 }?.roundToInt() ?: 0
     var hh by rememberSaveable { mutableStateOf(if (secs >= 3600) (secs / 3600).toString() else "") }
     var mm by rememberSaveable { mutableStateOf(if (secs > 0) ((secs % 3600) / 60).toString() else "") }
     var ss by rememberSaveable { mutableStateOf(if (secs > 0) (secs % 60).toString().padStart(2, '0') else "") }
-    var goal by rememberSaveable { mutableStateOf(existing?.goal ?: Goal.HALF) }
-    var terrain by rememberSaveable { mutableStateOf(existing?.terrain ?: Terrain.FLAT) }
-    var hills by rememberSaveable { mutableStateOf(existing?.hills ?: false) }
+    var goal by rememberSaveable { mutableStateOf(source?.goal ?: Goal.HALF) }
+    var terrain by rememberSaveable { mutableStateOf(source?.terrain ?: Terrain.FLAT) }
+    var hills by rememberSaveable { mutableStateOf(source?.hills ?: false) }
     var race by rememberSaveable { mutableStateOf(known?.raceEpochDay ?: (today + 7 * 12)) }
-    var days by rememberSaveable { mutableStateOf(existing?.days ?: listOf(1, 2, 4, 6)) }
+    var days by rememberSaveable { mutableStateOf(source?.days ?: listOf(1, 2, 4, 6)) }
+    // easy weeks before the plan proper: offered when a plan follows another one
+    var recovery by rememberSaveable { mutableIntStateOf(source?.recoveryWeeks ?: 0) }
+    val askRecovery = !beginner && (template != null || (existing?.recoveryWeeks ?: 0) > 0)
+    val recoveryWeeks = if (askRecovery) recovery else 0
     var km by rememberSaveable { mutableFloatStateOf(known?.currentKm?.toFloat() ?: 25f) }
     // switching plan type starts afresh from today
     val start = existing?.takeIf { it.beginner == beginner }?.startEpochDay?.let { if (beginner) it else it.coerceAtMost(race) } ?: today
-    val pages = if (beginner) BEGINNER_PAGES else RACE_PAGES
+    val pages = if (beginner) BEGINNER_PAGES else if (askRecovery) NEXT_PAGES else RACE_PAGES
+    // the training itself starts after any recovery weeks
+    val planStart = if (recoveryWeeks > 0) Recovery.planStart(start, recoveryWeeks) else start
 
     val timeSec = (hh.toIntOrNull() ?: 0) * 3600 + (mm.toIntOrNull() ?: 0) * 60 + (ss.toIntOrNull() ?: 0)
     val vdot = if (timeSec > 0) Vdot.vdot(distance.metres, timeSec.toDouble()) else Double.NaN
     val vdotOk = vdot.isFinite() && vdot in 20.0..85.0
-    val weeks = PlanBuilder.weeksBetween(start, race)
+    val weeks = PlanBuilder.weeksBetween(planStart, race)
 
     val valid = when (pages[page]) {
         Page.FITNESS -> vdotOk
-        Page.RACE -> race >= start && weeks >= goal.minWeeks
+        Page.RACE -> race >= planStart && weeks >= goal.minWeeks
         Page.DAYS -> if (beginner) days.size == StartRunning.PER_WEEK else days.size in 3..6
         else -> true
     }
@@ -169,6 +179,38 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                         Text(
                             "You'll get a 9-week plan of three sessions a week. It starts with short runs and walking breaks, " +
                                 "and builds to running for 30 minutes without stopping. No race time needed.",
+                            style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
+                        )
+                    }
+                }
+
+                Page.RECOVER -> {
+                    Question(
+                        "Ease back in first?",
+                        "A week or two of short, easy runs lets your legs recover before the next plan builds up again.",
+                    )
+                    listOf(
+                        Triple(0, "Start the new plan now", "Straight back into training"),
+                        Triple(1, "One easy week", "Good after a 5K or 10K"),
+                        Triple(2, "Two easy weeks", "Good after a half or full marathon"),
+                    ).forEach { (n, title, help) ->
+                        val selected = n == recovery
+                        Column(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) Palette.Ink else Color.Transparent)
+                                .clickable { recovery = n }
+                                .padding(horizontal = 16.dp, vertical = 16.dp),
+                        ) {
+                            Text(title, style = MaterialTheme.typography.headlineSmall, color = if (selected) Color.White else Palette.Ink)
+                            Text(help, style = MaterialTheme.typography.bodyMedium, color = if (selected) Color.White.copy(alpha = 0.8f) else Palette.Slate)
+                        }
+                        HorizontalDivider(color = Palette.Line)
+                    }
+                    if (recovery > 0) {
+                        Spacer(Modifier.height(24.dp))
+                        Text(
+                            "Rest for a couple of days, then easy runs on your usual days. " +
+                                "The new plan starts on Monday ${dayMonthYear(planStart)}.",
                             style = MaterialTheme.typography.bodyMedium, color = Palette.Slate,
                         )
                     }
@@ -259,8 +301,12 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                 }
 
                 Page.RACE -> {
-                    Question("When's race day?", "A ${goal.label.lowercase()} plan needs at least ${goal.minWeeks} weeks.")
-                    val minDay = start + (goal.minWeeks - 1) * 7L
+                    Question(
+                        "When's race day?",
+                        "A ${goal.label.lowercase()} plan needs at least ${goal.minWeeks} weeks" +
+                            if (recoveryWeeks > 0) ", after your easy ${if (recoveryWeeks == 1) "week" else "weeks"}." else ".",
+                    )
+                    val minDay = planStart + (goal.minWeeks - 1) * 7L
                     val state = rememberDatePickerState(
                         initialSelectedDateMillis = race * DAY_MS,
                         selectableDates = object : SelectableDates {
@@ -270,7 +316,7 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     )
                     LaunchedEffect(state.selectedDateMillis) { state.selectedDateMillis?.let { race = it / DAY_MS } }
                     Text(
-                        if (weeks >= goal.minWeeks) "$weeks weeks of training, race on ${LocalDate.ofEpochDay(race).let { "${it.dayOfMonth} ${it.month.name.lowercase().replaceFirstChar(Char::uppercase)} ${it.year}" }}"
+                        if (weeks >= goal.minWeeks) "$weeks weeks of training, race on ${dayMonthYear(race)}"
                         else "Pick a later date",
                         style = MaterialTheme.typography.titleMedium,
                         color = if (weeks >= goal.minWeeks) Palette.Ink else MaterialTheme.colorScheme.error,
@@ -348,7 +394,10 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
                     ),
                 )
                 else onDone(
-                    Profile(distance, timeSec.toDouble(), goal, start, race, days.sorted(), km.roundToInt().toDouble(), known?.peakKm, terrain, hills, level),
+                    Profile(
+                        distance, timeSec.toDouble(), goal, start, race, days.sorted(), km.roundToInt().toDouble(), known?.peakKm, terrain, hills, level,
+                        recoveryWeeks = recoveryWeeks,
+                    ),
                 )
             },
             enabled = valid,
@@ -359,6 +408,9 @@ fun OnboardingScreen(existing: Profile?, onDone: (Profile) -> Unit, onCancel: ((
         }
     }
 }
+
+private fun dayMonthYear(epochDay: Long): String =
+    LocalDate.ofEpochDay(epochDay).let { "${it.dayOfMonth} ${it.month.name.lowercase().replaceFirstChar(Char::uppercase)} ${it.year}" }
 
 @Composable
 private fun Question(title: String, help: String) {

@@ -44,14 +44,17 @@ object Progress {
     private const val RUN_CODE = ""
 
     fun planStatus(plan: Plan, done: Set<String>, today: Long): PlanStatus {
-        val week0 = PlanBuilder.mondayOf(plan.profile.startEpochDay)
+        // week 1 is the week of the first session (recovery weeks start a couple of days after the start day)
+        val week0 = plan.workouts.minByOrNull { it.planDay }?.let { PlanBuilder.mondayOf(it.planDay) - 7L * (it.week - 1) }
+            ?: PlanBuilder.mondayOf(plan.profile.startEpochDay)
         val week = if (today < week0) 0 else ((today - week0) / 7 + 1).toInt().coerceAtMost(plan.weeks)
         val monday = PlanBuilder.mondayOf(today)
         val thisWeek = plan.workouts.filter { it.epochDay in monday until monday + 7 }
         return PlanStatus(
             week = week,
             weeks = plan.weeks,
-            startsIn = (plan.profile.startEpochDay - today).coerceAtLeast(0),
+            // recovery weeks start with a couple of rest days: count to the first easy run
+            startsIn = ((plan.workouts.firstOrNull { it.phase == Phase.RECOVER }?.epochDay ?: plan.profile.startEpochDay) - today).coerceAtLeast(0),
             daysLeft = plan.profile.raceEpochDay - today,
             done = plan.workouts.count { it.id in done },
             total = plan.workouts.size,
@@ -102,12 +105,21 @@ object Progress {
     private val ONE_RUN = listOf(5000.0 to "First 5 km run", 10000.0 to "First 10 km run", 21097.5 to "First half marathon distance", 42195.0 to "First marathon distance")
     private val NON_STOP_MIN = listOf(5, 10, 20, 30)
 
-    /** Milestones reached, oldest first. Beginners get time-based ones instead of distances. */
-    fun milestones(runs: List<RunSummary>, plan: Plan?, done: Set<String>): List<Milestone> {
+    /** Title of the milestone for finishing [plan]. */
+    fun finishedTitle(plan: Plan): String = when {
+        plan.profile.beginner -> "Finished the Couch to 5K plan"
+        else -> "Finished your ${plan.profile.goal.label.let { if (it.endsWith("K")) it else it.lowercase() }} plan"
+    }
+
+    /**
+     * Milestones reached, oldest first. Beginners get time-based ones instead of distances.
+     * [past] are milestones kept from earlier plans (finishing them).
+     */
+    fun milestones(runs: List<RunSummary>, plan: Plan?, done: Set<String>, past: List<Milestone> = emptyList()): List<Milestone> {
         val rs = runs.sortedBy { it.epochDay }
         if (rs.isEmpty()) return emptyList()
         val beginner = plan?.profile?.beginner == true
-        val out = ArrayList<Milestone>()
+        val out = ArrayList<Milestone>(past)
         out += Milestone("Your first run", rs.first().epochDay)
         RUN_COUNTS.forEach { n -> if (rs.size >= n) out += Milestone("$n runs", rs[n - 1].epochDay) }
         if (beginner) {
@@ -124,7 +136,7 @@ object Progress {
             }
         }
         if (plan != null && plan.workouts.isNotEmpty() && plan.workouts.all { it.id in done }) {
-            out += Milestone(if (beginner) "Finished the Couch to 5K plan" else "Finished your plan", plan.workouts.maxOf { it.epochDay })
+            out += Milestone(finishedTitle(plan), plan.workouts.maxOf { it.epochDay })
         }
         return out.sortedBy { it.epochDay }
     }

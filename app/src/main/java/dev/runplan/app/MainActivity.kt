@@ -59,8 +59,9 @@ class MainActivity : ComponentActivity() {
 }
 
 object Routes {
-    const val ONBOARDING = "onboarding?edit={edit}"
-    fun onboarding(edit: Boolean) = "onboarding?edit=$edit"
+    const val ONBOARDING = "onboarding?edit={edit}&next={next}"
+    /** [edit] changes the current plan; [next] sets up a new plan to follow it (the old one stays until it's built). */
+    fun onboarding(edit: Boolean, next: Boolean = false) = "onboarding?edit=$edit&next=$next"
     const val HOME = "home"
     const val SESSION = "session/{id}"
     fun session(id: String) = "session/$id"
@@ -95,16 +96,22 @@ private fun AppRoot(openRunSignal: Int) {
     NavHost(nav, startDestination = start) {
         composable(
             Routes.ONBOARDING,
-            arguments = listOf(navArgument("edit") { type = NavType.BoolType; defaultValue = false }),
+            arguments = listOf(
+                navArgument("edit") { type = NavType.BoolType; defaultValue = false },
+                navArgument("next") { type = NavType.BoolType; defaultValue = false },
+            ),
         ) { entry ->
             val edit = entry.arguments?.getBoolean("edit") ?: false
+            val next = !edit && entry.arguments?.getBoolean("next") == true && state.profile != null
+            val template = remember(next) { if (next) RunPlanApp.store.nextPlanTemplate(java.time.LocalDate.now().toEpochDay()) else null }
             OnboardingScreen(
                 existing = if (edit) state.profile else null,
+                template = template,
                 onDone = { profile ->
-                    RunPlanApp.store.setProfile(profile)
+                    if (next) RunPlanApp.store.startNewPlan(profile) else RunPlanApp.store.setProfile(profile)
                     nav.navigate(Routes.HOME) { popUpTo(0) { inclusive = true } }
                 },
-                onCancel = if (edit) ({ nav.popBackStack(); Unit }) else null,
+                onCancel = if (edit || next) ({ nav.popBackStack(); Unit }) else null,
             )
         }
         composable(Routes.HOME) {
@@ -115,10 +122,7 @@ private fun AppRoot(openRunSignal: Int) {
                 buildWorkout = { nav.navigate(Routes.BUILD) },
                 resumeRun = { nav.navigate(Routes.RUN) },
                 editPlan = { nav.navigate(Routes.onboarding(true)) },
-                newPlan = {
-                    RunPlanApp.store.resetPlan()
-                    nav.navigate(Routes.onboarding(false)) { popUpTo(0) { inclusive = true } }
-                },
+                newPlan = { nav.navigate(Routes.onboarding(edit = false, next = true)) },
             )
         }
         composable(Routes.SESSION) { entry ->

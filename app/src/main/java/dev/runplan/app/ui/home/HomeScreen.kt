@@ -63,9 +63,9 @@ fun HomeScreen(
     ) { pad ->
         val m = Modifier.padding(pad)
         when (tab) {
-            0 -> PlanTab(m, openSession, openRun, startRun, buildWorkout, resumeRun)
+            0 -> PlanTab(m, openSession, openRun, startRun, buildWorkout, resumeRun, newPlan)
             1 -> RunsTab(m, openRun)
-            2 -> ProgressTab(m, openRun)
+            2 -> ProgressTab(m, openRun, newPlan)
             else -> SettingsTab(m, editPlan, newPlan)
         }
     }

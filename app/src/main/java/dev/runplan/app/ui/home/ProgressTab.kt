@@ -46,6 +46,7 @@ import dev.runplan.core.Distance
 import dev.runplan.core.Effort
 import dev.runplan.core.Fmt
 import dev.runplan.core.PaceVerdict
+import dev.runplan.core.Phase
 import dev.runplan.core.Plan
 import dev.runplan.core.Progress
 import dev.runplan.core.RunSummary
@@ -70,7 +71,7 @@ private val effortDistance = mapOf(
 private data class Dated(val effort: Effort, val run: RunRecord)
 
 @Composable
-fun ProgressTab(modifier: Modifier, openRun: (String) -> Unit) {
+fun ProgressTab(modifier: Modifier, openRun: (String) -> Unit, newPlan: () -> Unit) {
     val ctx = LocalContext.current
     val state by RunPlanApp.store.state.collectAsStateWithLifecycle()
     val plan by RunPlanApp.store.plan.collectAsStateWithLifecycle()
@@ -83,7 +84,7 @@ fun ProgressTab(modifier: Modifier, openRun: (String) -> Unit) {
     Column(modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
         Spacer(Modifier.height(20.dp))
         Text("Progress", style = MaterialTheme.typography.headlineMedium)
-        plan?.let { PlanCard(it, state.done, summaries, today) }
+        plan?.let { PlanCard(it, state.done, summaries, today, newPlan) }
         if (runs.isEmpty()) {
             Spacer(Modifier.height(24.dp))
             Text(
@@ -136,12 +137,14 @@ private fun Bar(fraction: Float) {
 private fun daysWord(n: Long) = if (n == 1L) "1 day" else "$n days"
 
 @Composable
-private fun PlanCard(plan: Plan, done: Set<String>, runs: List<RunSummary>, today: Long) {
+private fun PlanCard(plan: Plan, done: Set<String>, runs: List<RunSummary>, today: Long, newPlan: () -> Unit) {
     val s = remember(plan, done, today) { Progress.planStatus(plan, done, today) }
     val beginner = plan.profile.beginner
     Card {
         when {
             s.finished -> Text("Plan finished", style = MaterialTheme.typography.headlineSmall)
+            s.week == 0 && plan.workouts.firstOrNull()?.phase == Phase.RECOVER ->
+                Text("Rest, then easy runs from ${if (s.startsIn <= 1) "tomorrow" else "in ${daysWord(s.startsIn)}"}", style = MaterialTheme.typography.headlineSmall)
             s.week == 0 -> Text(if (s.startsIn <= 1) "Your plan starts tomorrow" else "Your plan starts in ${daysWord(s.startsIn)}", style = MaterialTheme.typography.headlineSmall)
             else -> Text("Week ${s.week} of ${s.weeks}", style = MaterialTheme.typography.headlineSmall)
         }
@@ -164,6 +167,12 @@ private fun PlanCard(plan: Plan, done: Set<String>, runs: List<RunSummary>, toda
             "${s.done} of ${s.total} sessions done" + if (s.weekTotal > 0 && !s.finished) ", ${s.weekDone} of ${s.weekTotal} this week" else "",
             style = MaterialTheme.typography.labelMedium, color = Palette.Slate,
         )
+        if (s.finished) {
+            Spacer(Modifier.height(14.dp))
+            Button(onClick = newPlan, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                Text("Start a new plan")
+            }
+        }
         if (beginner) {
             val best = remember(runs) { Progress.longestNonStop(runs)?.first ?: 0.0 }
             Spacer(Modifier.height(16.dp))
@@ -198,7 +207,8 @@ private fun WeekCard(plan: Plan?, done: Set<String>, runs: List<RunSummary>, tod
 @Composable
 private fun Streak(plan: Plan?, done: Set<String>, runs: List<RunSummary>, today: Long) {
     val weeks = remember(plan, done, runs, today) { Progress.streak(plan, done, runs.map { it.epochDay }, today) }
-    val reached = remember(plan, done, runs) { Progress.milestones(runs, plan, done) }
+    val past = RunPlanApp.store.state.collectAsStateWithLifecycle().value.pastMilestones
+    val reached = remember(plan, done, runs, past) { Progress.milestones(runs, plan, done, past) }
     val next = remember(plan, runs) { Progress.nextMilestone(runs, plan) }
     Section("Streak", if (plan != null) "Weeks in a row with every planned session done" else "Weeks in a row with at least one run")
     if (weeks > 0) {
