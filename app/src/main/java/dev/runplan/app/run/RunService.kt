@@ -275,8 +275,10 @@ class RunService : LifecycleService() {
             if (s.voice && c is Cue.Countdown) speaker.hold()
             if (c is Cue.StepStart || c is Cue.Finished) speaker.unhold()
             // A get-ready step (hill countdown, or waiting for the race to start) ends in a short
-            // "Go!": keep the podcast ducked through it so that cue isn't clipped.
-            if (s.voice && c is Cue.StepStart && c.step.kind == StepKind.READY) speaker.hold()
+            // "Go!", and a short step (a 10 s hill sprint and its rest) is over before the podcast
+            // could come back up: keep it ducked through them, so the next cue starts straight away
+            // instead of after a fade and lead-in.
+            if (s.voice && c is Cue.StepStart && (c.step.kind == StepKind.READY || (c.step.secs ?: Double.MAX_VALUE) < 30)) speaker.hold()
             if (c is Cue.StepStart) {
                 stepStarts += SystemClock.elapsedRealtime()
                 buzz(longArrayOf(0, 120, 80, 120))

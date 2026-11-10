@@ -53,10 +53,31 @@ fun WorkoutShape(
         val g = gap.toPx()
         val usable = size.width - g * (bars.size - 1).coerceAtLeast(0)
         val r = CornerRadius(2.dp.toPx())
+        // widths with a minimum so short steps stay visible, scaled back to fit the row
+        val raw = bars.map { (it.weight / total * usable).coerceAtLeast(1.5f) }
+        val fit = (usable / raw.sum().coerceAtLeast(1f)).coerceAtMost(1f)
+        val widths = raw.map { it * fit }
+        // The marker goes through the bar it's in, at that bar's share of time. (It used to be placed
+        // at the time fraction of the whole width, which ignored the gaps and minimum widths, so it
+        // fell behind on sessions with many short steps.)
+        val cut = progress?.let { p ->
+            val at = p.coerceIn(0f, 1f) * total
+            var acc = 0f
+            var xx = 0f
+            var pos = size.width
+            for ((i, b) in bars.withIndex()) {
+                if (at < acc + b.weight || i == bars.lastIndex) {
+                    pos = xx + widths[i] * ((at - acc) / b.weight.coerceAtLeast(1e-6f)).coerceIn(0f, 1f)
+                    break
+                }
+                acc += b.weight
+                xx += widths[i] + g
+            }
+            pos
+        }
         var x = 0f
-        val cut = progress?.let { it.coerceIn(0f, 1f) * size.width }
-        for (b in bars) {
-            val w = (b.weight / total * usable).coerceAtLeast(1.5f)
+        for ((i, b) in bars.withIndex()) {
+            val w = widths[i]
             val h = Palette.height(b.zone) * size.height
             val top = size.height - h
             val c = Palette.zone(b.zone)

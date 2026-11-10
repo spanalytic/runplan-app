@@ -437,17 +437,20 @@ class CoreTest {
             assertTrue(eng.finished, all)
             assertTrue(cues.none { it is Cue.PaceAlert })
             assertTrue(spoken.any { it.startsWith("Jog to the bottom of your hill and tap Next when you're there. That lap was") }, all)
-            val ready = spoken.indexOfFirst { it.startsWith("Get ready. In 10 seconds, ") && it.contains("hard uphill for") }
+            val ready = spoken.indexOfFirst { it.startsWith("Get ready to ") && it.contains("hard uphill for") }
             assertTrue(ready >= 0, all)
-            assertEquals(listOf("3", "2", "1", "Go!"), spoken.subList(ready + 1, ready + 5), all)
-            val rest = spoken.indexOfFirst { it.startsWith("Rest. That lap was") }
-            assertTrue(rest > ready + 4 && spoken.subList(ready + 5, rest).all { it == "10 seconds left." }, all)
-            assertEquals("Jog back down and tap Next when you're at the bottom.", spoken[rest + 1])
+            // the count-in is one utterance (separate words were dropped), and the effort then starts silently
+            assertEquals(listOf(RunEngine.COUNT_IN, ""), spoken.subList(ready + 1, ready + 3), all)
+            val rest = spoken.indexOfFirst { it.startsWith("Stop and rest for 10 seconds. That lap was") }
+            assertTrue(rest > ready + 2 && spoken.subList(ready + 3, rest).all { it == "10 seconds left." }, all)
+            assertEquals("Jog back down and tap Next at the bottom to start the countdown.", spoken[rest + 1])
             assertTrue(spoken.any { it == "10 seconds left, then jog to the bottom of your hill." }, all)
             assertTrue(spoken.single { it.startsWith("Last one. Cool down for") }.let { !it.contains("That lap") }, all)
             assertTrue(spoken.none { it.contains("then rest") || it.contains("run as you like") }, all)
             assertEquals(1, spoken.count { it.startsWith("That was the last one.") }, all)
             assertEquals("H", eng.results.first { it.label.startsWith(word) }.zoneCode)
+            // kilometres are still spoken on the warm-up and cool-down
+            assertTrue(cues.filterIsInstance<Cue.Split>().isNotEmpty(), all)
             assertTrue(eng.results.filter { it.zoneCode == "H" }.all { it.hit == null })
         }
         // reads as a short summary, without the countdowns
@@ -795,5 +798,59 @@ class CoreTest {
         assertEquals("Finished your 10K plan", past[0].title)
         assertTrue(Progress.milestones(runs, plan, emptySet(), past).any { it.title == "Finished your 10K plan" })
         assertEquals("Finished your half marathon plan", Progress.finishedTitle(plan))
+    }
+
+    @Test fun hillCountInIsTimedToEndOnGo() {
+        val plan = PlanBuilder.build(profile.copy(terrain = Terrain.HILLY, hills = true))
+        val w = plan.workouts.first { it.type == SessionType.HILL_SPRINTS }
+        val eng = RunEngine("t", RunStep.flatten(w, plan.paces))
+        var t = 0L
+        var d = 0.0
+        eng.start()
+        while (eng.current.kind != StepKind.READY) { t += 250; d += 0.6; eng.update(t, d, 400.0); if (eng.current.isOpen) eng.advance() }
+        val readyAt = t
+        // what the screen shows while jogging to the hill: the countdown, then the sprint
+        val counted = ArrayList<Pair<Long, Cue>>()
+        while (eng.current.kind == StepKind.READY) { t += 250; eng.update(t, d, Double.NaN).forEach { counted += t to it } }
+        val countIn = counted.single { it.second is Cue.Remaining }
+        assertEquals(RunEngine.COUNT_IN, countIn.second.speech())
+        assertEquals(7_000L, countIn.first - readyAt)
+        val start = counted.last().second as Cue.StepStart
+        assertTrue(start.countedIn && start.speech().isEmpty())
+        // skipping the countdown still says "Go!"
+        while (eng.current.kind != StepKind.READY) { t += 250; d += 0.6; eng.update(t, d, 400.0); if (eng.current.isOpen) eng.advance() }
+        t += 2000; eng.update(t, d, Double.NaN)
+        assertEquals("Go!", (eng.advance().single() as Cue.StepStart).speech())
+    }
+
+    @Test fun nextLabelNamesTheCountdownAndWhatFollows() {
+        val plan = PlanBuilder.build(profile.copy(terrain = Terrain.HILLY, hills = true))
+        val w = plan.workouts.first { it.type == SessionType.HILL_SPRINTS }
+        val eng = RunEngine("t", RunStep.flatten(w, plan.paces))
+        val reps = (w.blocks.single { it is Repeat } as Repeat).times
+        assertEquals("10 s countdown, then Hill sprint 1 of $reps (10 s hard uphill)", eng.nextLabel(2))
+        assertEquals("Hill sprint 1 of $reps, 10 s hard uphill", eng.nextLabel(3))
+    }
+
+    @Test fun everyWorkoutButARaceSaysKilometresFromTheStart() {
+        val plan = PlanBuilder.build(profile)
+        // an easy-tempo-easy style session: kilometres count across steps, not from each step's start
+        val w = plan.workouts.first { wk -> wk.flatSteps().count { (it.secs ?: 0.0) >= 480 || (it.metres ?: 0.0) >= 2000 } >= 2 && wk.type != SessionType.RACE }
+        val steps = RunStep.flatten(w, plan.paces)
+        val eng = RunEngine("t", steps)
+        val cues = ArrayList<Cue>()
+        var t = 0L
+        var d = 0.0
+        while (!eng.finished && t < 4 * 3_600_000L) {
+            t += 1000
+            val p = eng.current.typical.takeIf(Double::isFinite) ?: plan.paces.jog
+            d += 1000 / p
+            cues += eng.update(t, d, p)
+            if (eng.current.isOpen) cues += eng.advance()
+        }
+        val km = cues.filterIsInstance<Cue.Split>().map { it.km }
+        assertTrue(km.isNotEmpty())
+        assertEquals(km.sorted().distinct(), km, "kilometres never restart: $km")
+        assertTrue(km.last() >= (d / 1000).toInt() - 3, "$km over ${d / 1000} km")
     }
 }

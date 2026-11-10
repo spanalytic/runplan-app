@@ -61,6 +61,7 @@ import dev.runplan.core.Fmt
 import dev.runplan.core.PaceStatus
 import dev.runplan.core.RunState
 import dev.runplan.core.RunStep
+import dev.runplan.core.StepKind
 import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.delay
 
@@ -143,7 +144,7 @@ fun RunScreen(onSaved: (String) -> Unit, onDiscarded: () -> Unit) {
                     }
                 }
 
-                else -> ActiveRun(s, view.phase, ink, sub, shapeBars, onFinish = { confirmFinish = true })
+                else -> ActiveRun(s, view.phase, ink, sub, shapeBars, view.steps, onFinish = { confirmFinish = true })
             }
         }
     }
@@ -175,6 +176,7 @@ private fun ActiveRun(
     ink: Color,
     sub: Color,
     shapeBars: List<dev.runplan.app.ui.components.Bar>,
+    steps: List<RunStep>,
     onFinish: () -> Unit,
 ) {
     val ctx = LocalContext.current
@@ -216,8 +218,17 @@ private fun ActiveRun(
         val tapToContinue = !s.stepRemaining.isFinite() && s.nextLabel.isNotEmpty()
         // race day: the race starts when you tap Continue after the warm-up
         val raceWait = s.stepLabel == RunStep.READY_TO_RACE
+        // say plainly what tapping Next starts: a countdown first, not the effort itself
+        val countdownNext = steps.getOrNull(s.stepIndex + 1)?.let { it.kind == StepKind.READY && !it.isOpen } == true
         if (tapToContinue) {
-            Text(if (raceWait) "Tap Continue when the race starts" else "Tap Next when you're ready", style = MaterialTheme.typography.headlineSmall, color = ink)
+            Text(
+                when {
+                    raceWait -> "Tap Continue when the race starts"
+                    countdownNext -> "Tap Next to start the countdown"
+                    else -> "Tap Next when you're ready"
+                },
+                style = MaterialTheme.typography.headlineSmall, color = ink,
+            )
         }
         if (s.stepRemaining.isFinite()) {
             Row(verticalAlignment = Alignment.Bottom) {
@@ -239,7 +250,7 @@ private fun ActiveRun(
 
         WorkoutShape(shapeBars, height = 44.dp, progress = progressOf(shapeBars, s.stepIndex, s.stepProgress), marker = ink)
         Spacer(Modifier.height(8.dp))
-        if (s.nextLabel.isNotEmpty()) Text("Next: ${s.nextLabel}", style = MaterialTheme.typography.bodyMedium, color = sub, maxLines = 1)
+        if (s.nextLabel.isNotEmpty()) Text("Next: ${s.nextLabel}", style = MaterialTheme.typography.titleMedium, color = ink, maxLines = 2)
         Spacer(Modifier.height(20.dp))
 
         // controls

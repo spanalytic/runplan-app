@@ -132,6 +132,8 @@ sealed interface Cue {
         val afterCountdown: Boolean = false,
         /** The step before was a recovery jog, whose result isn't read out. */
         val prevRecovery: Boolean = false,
+        /** The countdown before this step already said "Go!", so the start needs no words. */
+        val countedIn: Boolean = false,
     ) : Cue
     /** "10 seconds left" / "200 metres to go" (no full stop), announcing what comes next. */
     data class Countdown(val left: String, val next: RunStep?) : Cue
@@ -163,14 +165,18 @@ sealed interface Cue {
                 "Warm-up done. Tap Continue when the race starts." +
                     (next?.takeIf { it.hasTarget }?.let { " Your target is ${spokenPace((it.fast + it.slow) / 2)} per kilometre." } ?: "")
             step.kind == StepKind.READY ->
-                "Get ready." + (next?.let { " In ${spokenDuration(step.secs ?: 10.0)}, ${action(it)}." } ?: "")
+                "Get ready" + (next?.let { " to ${action(it)}" } ?: "") + "."
+            // "Three. Two. One. Go!" was spoken as one utterance at the end of the countdown
+            countedIn -> ""
             afterCountdown -> "Go!"
             step.hill && step.isOpen && step.label == RunStep.TO_HILL ->
                 "Jog to the bottom of your hill and tap Next when you're there." + (prev?.let { " " + spokenResult(it) } ?: "")
             step.hill && step.isOpen ->
-                if (next?.kind == StepKind.READY) "Jog back down and tap Next when you're at the bottom."
+                if (next?.kind == StepKind.READY) "Jog back down and tap Next at the bottom to start the countdown."
                 else "That was the last one. Jog back down and tap Next for the cool-down."
-            step.hill && step.kind == StepKind.RECOVERY -> "Rest." + (prev?.let { " " + spokenResult(it) } ?: "")
+            // said the moment the effort ends, so it starts with what to do
+            step.hill && step.kind == StepKind.RECOVERY ->
+                "Stop and rest" + (step.secs?.let { " for ${spokenDuration(it)}" } ?: "") + "." + (prev?.let { " " + spokenResult(it) } ?: "")
             // a recovery jog: how long it lasts and how the rep went, no pace
             step.kind == StepKind.RECOVERY -> sentence(action(step)) + (prev?.let { " " + spokenResult(it) } ?: "")
             else -> buildString {
@@ -419,6 +425,8 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
     val splits = ArrayList<Double>()
 
     val current: RunStep get() = steps[index]
+    /** Race day (it waits for Continue before the race): km updates count from the start of each step. */
+    private val isRace = steps.any { it.kind == StepKind.READY && it.isOpen }
 
     fun start(): List<Cue> = listOf(Cue.StepStart(current, 0, steps.size, steps.getOrNull(1), null))
 
@@ -490,27 +498,31 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         while (recent.size > 2 && elapsedMs - recent.first().first > ALERT_WINDOW_MS + 5_000) recent.removeFirst()
         val cues = ArrayList<Cue>()
 
-        // whole-run km splits, kept for the run's splits chart
+        // Spoken km updates only on longer continuous steps, so reps aren't cluttered, and not
+        // while waiting for the race to start.
+        val st0 = current
+        val longStep = (st0.metres ?: 0.0) >= 2000 || (st0.secs ?: 0.0) >= 480 || (st0.isOpen && !st0.hill && st0.kind != StepKind.READY)
+        // whole-run km splits, kept for the run's splits chart and spoken in every workout but a race
         while (distanceM >= nextSplitKm * 1000.0) {
-            splits += (elapsedMs - lastSplitMs) / 1000.0
+            val sec = (elapsedMs - lastSplitMs) / 1000.0
+            splits += sec
             lastSplitMs = elapsedMs
+            if (longStep && !isRace) cues += Cue.Split(nextSplitKm, sec)
             nextSplitKm++
         }
-        // spoken km updates count from the start of the step, so a race says "Kilometre 1" one
-        // kilometre into the race, not into the warm-up. Only on longer continuous steps, so reps
-        // aren't cluttered, and not while waiting for the race to start.
+        // race day: spoken km updates count from the start of the step, so the race says
+        // "Kilometre 1" one kilometre into the race, not into the warm-up
         while (stepM() >= stepSplitKm * 1000.0) {
             val sec = (elapsedMs - stepSplitMs) / 1000.0
             stepSplitMs = elapsedMs
-            val st = current
-            val longStep = (st.metres ?: 0.0) >= 2000 || (st.secs ?: 0.0) >= 480 || (st.isOpen && !st.hill && st.kind != StepKind.READY)
-            if (longStep) cues += Cue.Split(stepSplitKm, sec)
+            if (longStep && isRace) cues += Cue.Split(stepSplitKm, sec)
             stepSplitKm++
         }
 
         val rem = remaining()
-        // countdown to a tap-started rep: "3", "2", "1", then the rep starts with "Go!"
-        if (current.kind == StepKind.READY) for (n in 3 downTo 1) if (rem <= n && rem > 0 && said.add("r$n")) cues += Cue.Remaining("$n")
+        // countdown to a tap-started rep, as one utterance so every word is heard (separate one-word
+        // utterances were dropped after the first). Timed so "Go!" lands as the rep starts.
+        if (current.kind == StepKind.READY && rem <= COUNT_IN_SEC && rem > 0 && said.add("go")) cues += Cue.Remaining(COUNT_IN)
         if (rem.isFinite() && rem <= 0) {
             cues += advance()
             return cues
@@ -564,6 +576,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         if (finished) return emptyList()
         val done = StepResult(current.label, current.zoneCode, current.fast, current.slow, stepSec(), stepM())
         results += done
+        val countedIn = "go" in said
         stepStartMs = elapsedMs
         stepStartM = distanceM
         stepSplitKm = 1
@@ -582,6 +595,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
                 current, index, steps.size, steps.getOrNull(index + 1), done,
                 afterCountdown = before.kind == StepKind.READY,
                 prevRecovery = before.kind == StepKind.RECOVERY,
+                countedIn = before.kind == StepKind.READY && countedIn,
             ))
         }
     }
@@ -593,6 +607,9 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         const val ALERT_SETTLE_MS = 45_000L
         const val ALERT_SUSTAIN_MS = 20_000L
         const val ALERT_GAP_MS = 90_000L
+        /** The spoken count-in at the end of a get-ready step, and how many seconds before the end it starts. */
+        const val COUNT_IN = "Three. Two. One. Go!"
+        const val COUNT_IN_SEC = 3.0
     }
 
     /** Step results so far, including the step in progress, without ending it (for saving progress mid-run). */
@@ -619,6 +636,17 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
         )
     }
 
+    /**
+     * What comes at step [i], for the screen. A countdown also names the step it leads into, so it's
+     * clear that tapping Next starts the countdown, not the effort itself.
+     */
+    fun nextLabel(i: Int): String {
+        val st = steps.getOrNull(i) ?: return ""
+        val after = steps.getOrNull(i + 1)
+        return if (st.kind == StepKind.READY && !st.isOpen && after != null) "${st.describe()}, then ${after.label} (${after.describe()})"
+        else "${st.label}, ${st.describe()}"
+    }
+
     fun state(paused: Boolean, gpsOk: Boolean): RunState {
         val st = current
         val rem = if (finished) 0.0 else remaining()
@@ -642,7 +670,7 @@ class RunEngine(val title: String, val steps: List<RunStep>) {
             distanceM = distanceM,
             paused = paused,
             finished = finished,
-            nextLabel = steps.getOrNull(index + 1)?.let { "${it.label}, ${it.describe()}" } ?: "",
+            nextLabel = if (finished) "" else nextLabel(index + 1),
             gpsOk = gpsOk,
             lapPace = if (finished) Double.NaN else lapPace(),
         )
