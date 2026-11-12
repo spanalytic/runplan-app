@@ -162,9 +162,12 @@ object Progress {
     }
 
     /**
-     * Looks at the last 3 sessions with paced work in the past 6 weeks, judged against the
-     * plan's current paces (so results from before a pace change are judged fairly).
-     * Ahead: at least two sessions mostly faster than the band and none mostly slower. Behind: the reverse.
+     * Looks at the last 3 sessions with paced work in the past 6 weeks. Each step is judged against
+     * the target it was run to (stored with the step), so sessions run before a pace change, such as
+     * a new plan after a race, aren't marked slow against paces they were never set.
+     * Ahead: at least two sessions mostly faster than their targets and none mostly slower. Behind: the reverse.
+     * A change is only suggested when the runs also differ from the plan's current paces in the same
+     * direction: if the paces have already moved on, they suit the runner.
      */
     fun paceCheck(runs: List<RunSummary>, profile: Profile, paces: Paces, today: Long): PaceCheck {
         val sessions = runs.filter { it.epochDay in (today - 41)..today }
@@ -173,27 +176,31 @@ object Progress {
         if (sessions.size < 2) return PaceCheck(PaceVerdict.NOT_ENOUGH, sessions.size)
         var ahead = 0
         var behind = 0
-        val ratios = ArrayList<Double>()
+        val ratios = ArrayList<Double>()   // against the targets they were run to
+        val nowRatios = ArrayList<Double>()   // against the plan's current paces
         for ((_, steps) in sessions) {
             var fast = 0
             var slow = 0
             for ((s, z) in steps) {
-                val (lo, hi) = paces.band(z)
+                // older saves may lack a target: fall back to the current paces
+                val (lo, hi) = if (s.fast.isFinite() && s.slow.isFinite() && s.fast < s.slow) s.fast to s.slow else paces.band(z)
                 if (s.pace < lo - 3) fast++
                 if (s.pace > hi + 3) slow++
-                ratios += s.pace / paces.centre(z)
+                ratios += s.pace / ((lo + hi) / 2)
+                nowRatios += s.pace / paces.centre(z)
             }
             if (fast * 3 >= steps.size * 2) ahead++
             if (slow * 2 >= steps.size) behind++
         }
         val ratio = ratios.sorted()[ratios.size / 2]
+        val nowRatio = nowRatios.sorted()[nowRatios.size / 2]
         val verdict = when {
-            ahead >= 2 && behind == 0 && ratio < 0.99 -> PaceVerdict.AHEAD
-            behind >= 2 && ahead == 0 && ratio > 1.01 -> PaceVerdict.BEHIND
+            ahead >= 2 && behind == 0 && ratio < 0.99 && nowRatio < 0.99 -> PaceVerdict.AHEAD
+            behind >= 2 && ahead == 0 && ratio > 1.01 && nowRatio > 1.01 -> PaceVerdict.BEHIND
             else -> PaceVerdict.ON_TARGET
         }
-        val suggested = if (verdict == PaceVerdict.AHEAD || verdict == PaceVerdict.BEHIND) profile.recentSec * ratio.coerceIn(0.97, 1.03) else null
-        return PaceCheck(verdict, sessions.size, ratio, suggested)
+        val suggested = if (verdict == PaceVerdict.AHEAD || verdict == PaceVerdict.BEHIND) profile.recentSec * nowRatio.coerceIn(0.97, 1.03) else null
+        return PaceCheck(verdict, sessions.size, nowRatio, suggested)
     }
 
     /**

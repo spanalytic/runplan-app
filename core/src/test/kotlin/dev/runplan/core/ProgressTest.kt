@@ -123,6 +123,35 @@ class ProgressTest {
         assertTrue(after.verdict != PaceVerdict.AHEAD || after.ratio > fast.ratio, after.toString())
     }
 
+    @Test fun paceCheckJudgesRunsAgainstTheTargetsTheyWereRunTo() {
+        // Sessions run to an older, slower plan (e.g. before a race and a new plan from its result)
+        // were on target then; the new, quicker paces mustn't call them slow.
+        val today = day("2026-11-12")
+        val old = profile.copy(recentSec = profile.recentSec * 1.05).paces
+        val now = plan.paces
+        fun session(d: Long, z: Zone, pace: Double) = RunSummary(d, 8000.0, 2400.0, "d$d",
+            listOf(easy(600.0, 420.0), rep(z, pace, old, 360.0), rep(z, pace, old, 360.0), rep(z, pace, old, 360.0)))
+        val runs = listOf(
+            session(today - 20, Zone.T, old.threshold - 2),
+            session(today - 16, Zone.I, old.interval),
+            session(today - 13, Zone.T, old.threshold + 1),
+        )
+        assertTrue(old.threshold > now.threshold + 5)
+        val check = Progress.paceCheck(runs, profile, now, today)
+        assertEquals(PaceVerdict.ON_TARGET, check.verdict, check.toString())
+        assertEquals(null, check.suggestedSec)
+        // quicker than the old targets but not the current ones: the paces have already moved on
+        val quick = listOf(
+            session(today - 20, Zone.T, old.threshold - 12),
+            session(today - 13, Zone.T, old.threshold - 12),
+        )
+        assertEquals(PaceVerdict.ON_TARGET, Progress.paceCheck(quick, profile, now, today).verdict)
+        // steps saved without a target fall back to the current paces
+        fun bare(d: Long, pace: Double) = RunSummary(d, 8000.0, 2400.0, "d$d",
+            List(3) { StepResult("Rep", Zone.T.code, Double.NaN, Double.NaN, 300.0, 300.0 / pace * 1000) })
+        assertEquals(PaceVerdict.BEHIND, Progress.paceCheck(listOf(bare(today - 9, now.threshold + 20), bare(today - 2, now.threshold + 20)), profile, now, today).verdict)
+    }
+
     @Test fun easyTrendIsWeeklyAndCalm() {
         val today = day("2026-11-22")
         val monday = PlanBuilder.mondayOf(today)
